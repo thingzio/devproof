@@ -1,0 +1,142 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# A pull request that is force-pushed should not leave its previous run
+# burning runners; the newest commit is the only one whose result matters.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: .go-version
+          check-latest: true
+      - id: versions
+        uses: ./.github/actions/load-versions
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: ${{ steps.versions.outputs.golangci_lint }}
+          args: --config .golangci.yaml
+      - name: actionlint
+        run: |
+          go install "github.com/rhysd/actionlint/cmd/actionlint@${{ steps.versions.outputs.actionlint }}"
+          actionlint
+      - name: go mod tidy is committed
+        run: |
+          go mod tidy
+          git diff --exit-code -- go.mod go.sum
+
+  # The determinism matrix from docs/testing.md. Byte-identical output across
+  # every cell is the claim DevProof makes, so it is tested on every push
+  # rather than saved for release day.
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: .go-version
+          check-latest: true
+      - name: test
+        run: make cover
+      - name: upload coverage
+        if: matrix.os == 'ubuntu-latest'
+        uses: actions/upload-artifact@v5
+        with:
+          name: coverage
+          path: coverage.out
+          if-no-files-found: error
+
+  # Golden bytes get their own job so a failure reads as "the format changed"
+  # rather than hiding inside a general test failure (DP-015).
+  golden:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: .go-version
+          check-latest: true
+      - name: format golden vectors
+        run: make test-golden
+
+  # Determinism is a property of the artifact, not of a single run: build the
+  # same fixtures twice under deliberately different ambient conditions and
+  # require identical digests. See docs/testing.md "Determinism matrix".
+  determinism:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: .go-version
+          check-latest: true
+      # A -run pattern that matches nothing exits 0, so the pattern is
+      # asserted before it is trusted: a silently empty determinism job is
+      # worse than no determinism job.
+      - name: the determinism pattern matches real tests
+        run: |
+          count="$(go test -list '${{ env.PATTERN }}' ./... | grep -c '^Test' || true)"
+          echo "matched ${count} tests"
+          test "${count}" -ge 5
+        env:
+          PATTERN: 'Deterministic|Golden|Canonical'
+      - name: first pass
+        env:
+          TZ: UTC
+          LANG: C
+        run: |
+          umask 022
+          go test -count=1 -run 'Deterministic|Golden|Canonical' ./...
+      - name: second pass under different ambient state
+        env:
+          TZ: Pacific/Kiritimati
+          LANG: en_US.UTF-8
+          SOURCE_DATE_EPOCH: '1700000000'
+        run: |
+          umask 077
+          cd "$(mktemp -d)" && cd - >/dev/null
+          go test -count=1 -run 'Deterministic|Golden|Canonical' ./...
+
+  vuln:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: .go-version
+          check-latest: true
+      - id: versions
+        uses: ./.github/actions/load-versions
+      - name: govulncheck
+        run: |
+          go install "golang.org/x/vuln/cmd/govulncheck@${{ steps.versions.outputs.govulncheck }}"
+          govulncheck ./...
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: .go-version
+          check-latest: true
+      - run: make build

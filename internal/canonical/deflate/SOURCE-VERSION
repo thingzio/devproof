@@ -1,0 +1,29 @@
+Frozen copy of the Go standard library DEFLATE encoder.
+
+source:   go/src/compress/flate
+go:       go1.27.1
+license:  BSD-3-Clause (see LICENSE in this directory)
+
+files:
+  deflate.go
+  deflatefast.go
+  huffman_bit_writer.go
+  huffman_code.go
+  level1.go
+  level2.go
+  level3.go
+  level4.go
+  level5.go
+  level6.go
+  load_store.go
+  regmask_amd64.go
+  regmask_other.go
+  token.go
+  internalerror.go   (extracted from inflate.go; see the file for why)
+
+edits:
+  - package clause changed from "flate" to "deflate"
+  - InternalError declaration extracted into internalerror.go
+
+Updating this copy is a bundle format version decision (DP-016), not a
+dependency upgrade. See doc.go.

@@ -1,0 +1,214 @@
+version: "2"
+
+run:
+  go: "1.27"
+  timeout: 5m
+  tests: true
+  modules-download-mode: readonly
+  # Queue behind golangci-lint's machine-wide lock rather than failing with
+  # "parallel golangci-lint is running". Several concurrent worktrees on one
+  # machine otherwise abort each other's runs over a transient lock. Inert in
+  # CI, where each job owns its runner.
+  allow-serial-runners: true
+
+output:
+  formats:
+    text:
+      path: stdout
+      print-linter-name: true
+      print-issued-lines: true
+  sort-order:
+    - linter
+    - severity
+    - file
+
+linters:
+  enable:
+    # Bug detection
+    - bodyclose
+    - copyloopvar
+    - errorlint
+    - nilnil
+    - staticcheck
+
+    # Code quality
+    - asciicheck
+    - dogsled
+    - dupl
+    - exhaustive
+    - funlen
+    - goconst
+    - gocritic
+    - govet
+    - misspell
+    - nakedret
+    - prealloc
+    - revive
+    - unconvert
+    - unparam
+    - whitespace
+
+    # Security
+    - gosec
+
+    # Context discipline
+    - contextcheck
+    - noctx
+
+    # Dependency management
+    - depguard
+
+    # Testing
+    - tparallel
+
+    # Style
+    - importas
+
+    # Scoped to internal/canonical below; see the forbidigo settings.
+    - forbidigo
+
+  settings:
+    funlen:
+      lines: 200
+      statements: 70
+      ignore-comments: true
+
+    govet:
+      enable:
+        - shadow
+
+    misspell:
+      mode: restricted
+      locale: US
+
+    unparam:
+      # Left off deliberately. This module is a library: an exported function
+      # whose result nothing inside the module consumes is the normal case,
+      # not a smell, because its callers are outside the module. Turning this
+      # on flags the public API for doing its job.
+      check-exported: false
+
+    whitespace:
+      multi-if: true
+      multi-func: true
+
+    dupl:
+      threshold: 200
+
+    goconst:
+      min-occurrences: 3
+      ignore-tests: true
+
+    depguard:
+      rules:
+        main:
+          list-mode: lax
+          deny:
+            - pkg: io/ioutil
+              desc: "Deprecated since Go 1.16. Use io and os instead."
+            - pkg: math/rand$
+              desc: "Use math/rand/v2, or crypto/rand for security-sensitive code."
+        # The canonical encoders decide the bytes DevProof's subject digest
+        # commits to. They may not reach for process-global state: no clocks,
+        # no environment, no working directory, no randomness. DP-012 states
+        # this as a design rule; depguard is what actually enforces it.
+        canonical:
+          list-mode: lax
+          files:
+            - "**/internal/canonical/**"
+          deny:
+            - pkg: math/rand$
+              desc: "Canonical encoding must be deterministic."
+            - pkg: math/rand/v2
+              desc: "Canonical encoding must be deterministic."
+            - pkg: crypto/rand
+              desc: "Canonical encoding must be deterministic."
+            - pkg: os
+              desc: "Canonical encoding must not read process or filesystem state."
+
+    # depguard bans whole packages, which is too blunt for time: the tar
+    # encoder legitimately constructs a fixed epoch, it just must never read
+    # a clock. forbidigo bans the calls rather than the import.
+    forbidigo:
+      analyze-types: true
+      forbid:
+        - pattern: '^time\.Now$'
+          msg: "Canonical encoding must not depend on a clock (DP-012). Use a format constant."
+        - pattern: '^time\.Since$'
+          msg: "Canonical encoding must not depend on a clock (DP-012)."
+
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    rules:
+      - linters:
+          - dupl
+          - errcheck
+          - funlen
+          - gocognit
+          - goconst
+          - gocyclo
+          - gosec
+          - noctx
+        path: _test\.go
+      # staticcheck does not know t.Fatal stops execution.
+      - linters:
+          - staticcheck
+        text: "SA5011"
+        path: _test\.go
+      - linters:
+          - funlen
+        path: cmd/.*/main\.go
+      # The canonical depguard rule keeps ambient state out of the encoders.
+      # Their tests legitimately read fixtures and the pinned-version file,
+      # and test code is not shipped.
+      - linters:
+          - depguard
+        path: internal/canonical/.*_test\.go
+        text: "list 'canonical'"
+      - linters:
+          - prealloc
+        path: _test\.go
+      # shadow flags the `if err := f(); err != nil` idiom, where the check is
+      # in the same statement and nothing can be swallowed. It earns its
+      # keep in production code, where a shadowed err can genuinely be lost;
+      # in tests it is pure noise against code that fails loudly anyway.
+      - linters:
+          - govet
+        text: 'shadow: declaration of "err"'
+        path: _test\.go
+      # forbidigo exists here only to keep clocks out of the canonical
+      # encoders. Everywhere else — evidence timestamps, retry backoff, CLI
+      # diagnostics — reading a clock is exactly right.
+      - linters:
+          - forbidigo
+        path-except: internal/canonical/
+    paths:
+      - third_party$
+      - builtin$
+      # Frozen copy of the Go standard library's DEFLATE encoder. It is
+      # excluded wholesale rather than linter by linter because the only
+      # correct response to a finding here is to do nothing: the value of the
+      # copy is that it is byte-identical to a known upstream revision, and
+      # several declarations are legitimately unused because their callers
+      # live in the decoder that was not copied. See DP-016.
+      - internal/canonical/deflate
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$
+      - internal/canonical/deflate

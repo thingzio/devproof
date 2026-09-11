@@ -37,6 +37,11 @@ dist/
 # Cosign / Signing
 cosign.*
 *.pem
+# Offline verification fixtures are committed on purpose: the evidence and
+# policy suites must run without a network-dependent identity service, and
+# their trust material is PEM. Keep this negation below the *.pem rule.
+!testdata/**/*.pem
+!**/testdata/**/*.pem
 
 # SBOM
 sbom.json
@@ -87,7 +92,7 @@ docs/plans
 docs/superpowers/
 .worktrees/
 
-# Per-clone local agent overlay (see AGENTS.md "Local Overlay" section)
+# Per-clone local agent overlay
 /AGENTS.local.md
 
 # Per-clone Claude Code personal overlay (auto-loaded alongside .claude/CLAUDE.md)

@@ -154,19 +154,244 @@ must not change those bytes for the same format version.
 Consequence: improvements that change subject bytes require an explicit new
 format version and coexistence rules.
 
+## DP-016: The DEFLATE encoder is frozen, not borrowed
+
+`internal/canonical/deflate` contains a pinned copy of the Go standard
+library's DEFLATE encoder. Format v1 compresses with that copy at level 9, not
+with whatever `compress/flate` ships in the building toolchain.
+
+The Go standard library does not promise byte-stable compressor output across
+releases, and neither does any third-party encoder. DP-015 makes layer bytes a
+compatibility surface and DP-002 derives subject identity from the encoded
+layer, so an unfrozen encoder would let a toolchain upgrade silently change
+every subject digest DevProof has ever produced.
+
+Only the encoder is frozen. Decompression may use any correct DEFLATE
+implementation, because inflation of a valid stream is unambiguous.
+
+Consequence: upgrading Go does not change emitted bytes. Changing the frozen
+encoder is a new bundle format version. The copy is not reformatted, relinted,
+or refactored; its provenance and license are recorded in `NOTICE`.
+
+## DP-017: Unicode tables are a format constant
+
+Path canonicalization normalizes to NFC and enforces case-fold uniqueness.
+Both depend on Unicode data tables that change between Unicode releases, and
+both feed the tree digest. Format v1 therefore pins:
+
+- Unicode 17.0.0, recorded in `.versions.yaml` under `specs.unicode`;
+- NFC as defined by that version; and
+- **simple** case folding, non-Turkic, per that version's `CaseFolding.txt`
+  `C` and `S` entries.
+
+Simple folding is specified rather than full folding because the rule exists
+to model what a case-insensitive filesystem does, and no shipping filesystem
+performs full folding. APFS, HFS+, and NTFS all use one-to-one mappings, so
+full folding would reject `ß.txt` alongside `ss.txt` — a pair that coexists
+perfectly well everywhere DevProof expands. Simple folding still catches every
+pair those filesystems actually merge, including `ß`/`ẞ` and the Kelvin sign
+against ASCII `K`.
+
+Uniqueness is enforced with a canonical fold key — each rune mapped to the
+lowest member of its `unicode.SimpleFold` orbit — rather than pairwise
+comparison, so collision detection is a map lookup and cannot depend on the
+order paths were visited.
+
+Consequence: an implementation must pin both its normalization tables
+(`golang.org/x/text/unicode/norm`) and its folding tables (the standard
+library's `unicode` package), and assert their versions in a test. They are
+separate data sets that can drift apart. A dependency or toolchain upgrade
+that advances either is a format-version decision.
+
+## DP-018: One organization identity, three spellings, all fixed
+
+Two of these are compatibility surfaces and cannot drift:
+
+```text
+manifest and policy API group   devproof.thingz.io
+OCI media type vendor tree      application/vnd.thingz.devproof.*
+Go module path                  github.com/thingzio/devproof
+```
+
+The spellings differ because their namespaces have different rules, not by
+accident: the API group is a DNS name, the media-type vendor tree follows the
+`vnd.` convention, and the Go module path follows the repository host, where
+`thingz.io` is not a legal organization name.
+
+## DP-019: Tar and gzip header fields have exactly one legal value
+
+Format v1 emits, for every entry:
+
+```text
+uid / gid        0
+uname / gname    empty
+mtime            0
+atime / ctime    absent
+linkname         empty
+devmajor/minor   0
+```
+
+`atime` and `ctime` are omitted rather than written as epoch, because emitting
+them requires PAX records that a USTAR-only reader would have to skip and that
+add bytes to the subject for no information. "Epoch or absent" was ambiguous:
+two conforming writers would have produced different subject digests for the
+same tree.
+
+A PAX extended header is emitted for exactly one reason: a path too long for
+the 100-byte USTAR name field. It carries a single `path` record. No other
+record, and no global header, may appear.
+
+Two alternatives were rejected. The USTAR `prefix` field is never written,
+because using it requires choosing where to split a path and two encoders that
+split differently produce different bytes for the same tree. A PAX `size`
+record is never written either; instead a file larger than the USTAR size
+field can represent — eleven octal digits, one byte short of 8 GiB — is
+rejected, and that bound is the ceiling for `maxFileBytes`. Supporting it would
+have added a branch in the code that decides artifact identity which no test
+could exercise without an 8 GiB fixture.
+
+The extended header's own entry is named `PaxHeaders/<n>`, where `n` is the
+zero-based ordinal of the entry it describes. A conforming reader never
+interprets that name; deriving it from the ordinal rather than from the path
+keeps it short, unique, and incapable of needing a PAX record itself. The
+described entry's USTAR name field carries the path truncated to the longest
+prefix of at most 100 bytes that ends on a rune boundary.
+
+Padding is zero, exactly two zero blocks terminate the archive, and no bytes
+follow them.
+
+## DP-020: Resource limits have documented defaults and hard ceilings
+
+```text
+                        default        ceiling
+files                   100000         1000000
+file bytes              1 GiB          8 GiB - 1 B
+expanded bytes          8 GiB          64 GiB
+compressed bytes        2 GiB          16 GiB
+compression ratio       200:1          1000:1
+canonical path bytes    1024           4096
+path segment bytes      255            255
+path depth              64             256
+config bytes            64 MiB         256 MiB
+manifest bytes          4 MiB          4 MiB
+spec bytes              1 MiB          16 MiB
+lock bytes              16 MiB         64 MiB
+referrers               256            4096
+evidence bytes          16 MiB         64 MiB
+parallel sources        4              64
+```
+
+Ceilings are refused at configuration time; defaults apply when a caller
+supplies none. Segment length is capped at 255 bytes because that is the limit
+most filesystems enforce, so a larger value would produce bundles that cannot
+be expanded anywhere.
+
+Limits are enforced against both declared sizes and actual streamed bytes. A
+small declared size never disables the streaming check.
+
+## DP-021: Limits compose by intersection; the strictest value wins
+
+Three inputs can bound one operation: the client's `Limits`, a per-request
+`Limits`, and a verification policy's `spec.limits`. The effective value for
+each bound is the minimum of those supplied, and the verification result
+records which input supplied each effective value.
+
+A policy may therefore tighten a bound but never relax one. This keeps a
+policy from being usable as a privilege escalation against the embedding
+application's own configuration.
+
+## DP-022: Expansion stages beside the destination and publishes exclusively
+
+The staging directory is created as a sibling of the destination, with mode
+`0700`, so that publication is a same-filesystem rename. `WithTempRoot` does
+not apply to expansion staging; it configures snapshot and layout scratch
+space only.
+
+Publication uses an exclusive rename — `renameat2(RENAME_NOREPLACE)` on Linux,
+`renamex_np(RENAME_EXCL)` on macOS. Plain `rename(2)` silently replaces an
+existing empty directory, which would let a destination that appeared between
+the pre-flight check and publication be overwritten. Where no exclusive rename
+is available the implementation must fail rather than fall back to a racy
+rename.
+
+The destination's parent directory is a trusted input. DevProof validates that
+it is a real directory it can open, but a caller that stages into a
+world-writable parent has already lost.
+
+## DP-023: Exit codes are a coarse projection of error codes
+
+The CLI maps every typed SDK code onto the documented exit codes:
+
+```text
+2   invalid-input, unsupported-version, unsupported-source
+3   source-resolution, stale-lock, unsafe-path, unsupported-file,
+    path-collision
+4   digest-mismatch, invalid-artifact, destination-exists, limit-exceeded
+5   evidence-invalid, policy-failed
+6   authentication, authorization, transport, timeout
+10  internal
+130 canceled, when caused by SIGINT
+```
+
+`limit-exceeded` maps to `4` because a limit is a property of the artifact
+being constructed or consumed. `timeout` maps to `6` because every bounded
+operation that can time out is a network or registry operation. Programmatic
+cancellation that did not come from SIGINT reports `canceled` in JSON and uses
+the exit code of the operation it interrupted.
+
+The JSON envelope always carries the finer code. Exit codes stay coarse so
+shell callers can branch on them stably.
+
+## DP-024: Provenance uses a DevProof predicate, not bare SLSA
+
+Evidence carries predicate type
+`https://devproof.thingz.io/provenance/v1`. It embeds a SLSA Provenance v1
+document unchanged and adds a DevProof section recording the manifest digest,
+lock digest, per-source resolution and filtered tree digest, resolver
+identities, and bundle format version.
+
+Neither substitution worked alone: SLSA v1 has no field that means "lock
+digest" or "per-source canonical tree digest", so a policy rule like
+`requireLockDigest` would have had to read them out of `internalParameters` by
+convention. Discarding SLSA would have given up every existing consumer of
+SLSA provenance.
+
+A policy may require either predicate type. When a policy requires SLSA v1, the
+embedded document satisfies it.
+
+## DP-025: Local sources are named by label, never by absolute path
+
+Evidence for a `path` source records the manifest-relative path or a
+caller-supplied logical label, plus the filtered tree digest. It never records
+an absolute path, and there is no opt-in to change that in v1.
+
+The tree digest already identifies the material exactly. An absolute path adds
+no verifiable fact and discloses workstation or build-agent structure to
+everyone who can read the published evidence.
+
+## DP-026: The semantic validator interface stays internal in v1
+
+`Validator` is defined but unexported. `verify` and `expand` report
+`semantics: not-evaluated` unless an embedding application supplies one
+through an internal seam.
+
+A public interface is a permanent compatibility obligation, and DevProof does
+not yet have two real validators to prove the shape is right. Keeping it
+internal costs nothing: no v1 operation requires validator execution.
+
+Consequence: the interface may be promoted in a later minor release without a
+format change. It may not be narrowed once exported.
+
 ## Open decisions
 
-The following must be resolved before the corresponding implementation phase:
+The following remain unresolved and are needed by the phase noted:
 
-1. Exact Sigstore referrer media types and whether signatures and provenance use
-   one or separate referrers.
+1. Exact Sigstore referrer media types, and whether signatures and provenance
+   use one referrer or two. Needed by phase 4.
 2. Referrer-tag fallback behavior for registries without the OCI referrers API,
-   including concurrency and copy semantics.
-3. Default and maximum file count, expanded size, compressed size, path length,
-   and compression-ratio limits.
-4. Whether the first CLI release supports Windows or only guarantees that
-   Windows produces and consumes the same portable format once supported.
-5. Whether local source evidence records a user-supplied logical label only or
-   may opt in to recording an absolute path.
-6. Which semantic-validator interface is public in v1; no validator execution
-   is required for the first bundle-format release.
+   including concurrency and copy semantics. Needed by phase 4.
+3. Whether the first CLI release ships Windows binaries. The format is designed
+   to be producible and consumable on Windows, and the portable profile exists
+   for that reason, but the determinism matrix does not include Windows until
+   executable-mode and atomic directory publication are proven there. Needed by
+   phase 6.

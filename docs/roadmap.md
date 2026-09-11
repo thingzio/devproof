@@ -10,10 +10,16 @@ Deliver:
 - resolve the open decisions in [decisions.md](decisions.md) needed by phases 1
   and 2;
 - machine-readable schemas for manifest, lock, config, policy, and CLI JSON;
-- normative tree-record, config, tar, gzip, and OCI manifest fixtures;
 - documented media types and format-version negotiation;
 - Go module, package skeleton, linting, tests, and CI; and
 - a compatibility test that fails on accidental golden-byte changes.
+
+The normative tree-record, config, tar, gzip, and OCI manifest fixtures cannot
+be produced here, because producing them requires the encoders that phase 1
+delivers. What belongs to phase 0 is the mechanism that freezes them: a golden
+harness that fails on any byte change, refuses to regenerate under CI, and
+reports where a stream diverged. Each fixture is committed as its encoder
+lands, and is immutable from that moment.
 
 Exit criteria:
 

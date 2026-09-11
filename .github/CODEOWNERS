@@ -1,0 +1,29 @@
+# Default owner for everything not matched below.
+* @mchmarny
+
+# Format bytes are a compatibility surface (DP-015). A change under these
+# paths can reissue the identity of every artifact DevProof has produced, so
+# they are called out separately rather than relying on the catch-all.
+/internal/canonical/ @mchmarny
+/bundle/format.go @mchmarny
+/docs/bundle-format.md @mchmarny
+/docs/decisions.md @mchmarny
+
+# Frozen upstream copy. Changes here are an upgrade decision, not a patch.
+/internal/canonical/deflate/ @mchmarny
+
+# Golden fixtures are immutable for a released format version.
+**/testdata/format/ @mchmarny
+
+# Safety boundaries: filesystem confinement, extraction limits, and the
+# verification pipeline.
+/internal/safefs/ @mchmarny
+/internal/oci/ @mchmarny
+/policy/ @mchmarny
+
+# Supply chain and release plumbing.
+/.github/ @mchmarny
+/.versions.yaml @mchmarny
+/.go-version @mchmarny
+/NOTICE @mchmarny
+/LICENSE @mchmarny

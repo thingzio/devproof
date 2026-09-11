@@ -1,0 +1,32 @@
+version: 2
+
+updates:
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 10
+    groups:
+      # One PR per week for routine upgrades keeps review attention on the
+      # ones that actually matter, below.
+      go-dependencies:
+        patterns: ["*"]
+        exclude-patterns:
+          - "github.com/sigstore/*"
+          - "oras.land/*"
+          - "github.com/opencontainers/*"
+          - "github.com/in-toto/*"
+    ignore:
+      # Bumping these can change emitted bytes or verification semantics, so
+      # they are upgraded deliberately with a golden-vector diff, never by an
+      # auto-merged dependency PR. See DP-015.
+      - dependency-name: "github.com/opencontainers/image-spec"
+      - dependency-name: "github.com/in-toto/attestation"
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      github-actions:
+        patterns: ["*"]

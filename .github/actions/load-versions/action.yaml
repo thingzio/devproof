@@ -1,0 +1,49 @@
+name: load-versions
+description: >-
+  Read pinned tool versions from .versions.yaml and expose them as step
+  outputs, so a workflow and a local Makefile run can never disagree about
+  which version of a tool they used.
+
+outputs:
+  golangci_lint:
+    description: golangci-lint version
+    value: ${{ steps.read.outputs.golangci_lint }}
+  govulncheck:
+    description: govulncheck version
+    value: ${{ steps.read.outputs.govulncheck }}
+  actionlint:
+    description: actionlint version
+    value: ${{ steps.read.outputs.actionlint }}
+  goreleaser:
+    description: goreleaser version
+    value: ${{ steps.read.outputs.goreleaser }}
+  syft:
+    description: syft version
+    value: ${{ steps.read.outputs.syft }}
+  grype:
+    description: grype version
+    value: ${{ steps.read.outputs.grype }}
+
+runs:
+  using: composite
+  steps:
+    - id: read
+      shell: bash
+      run: |
+        set -euo pipefail
+        emit() {
+          local key="$1"
+          local value
+          # Matches "  key: 'value'" and tolerates double quotes. Renovate
+          # annotations sit on their own line above the pin, so a comment
+          # never participates in the match.
+          value="$(sed -n "s/^[[:space:]]*${key}:[[:space:]]*['\"]\{0,1\}\([^'\"#]*\)['\"]\{0,1\}[[:space:]]*$/\1/p" .versions.yaml | head -1)"
+          if [[ -z "${value}" ]]; then
+            echo "::error file=.versions.yaml::no pinned version found for '${key}'"
+            exit 1
+          fi
+          echo "${key}=${value}" >> "$GITHUB_OUTPUT"
+        }
+        for key in golangci_lint govulncheck actionlint goreleaser syft grype; do
+          emit "${key}"
+        done
