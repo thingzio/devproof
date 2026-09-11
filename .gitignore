@@ -1,32 +1,94 @@
-# If you prefer the allow list template instead of the deny list, see community template:
-# https://github.com/github/gitignore/blob/main/community/Golang/Go.AllowList.gitignore
-#
-# Binaries for programs and plugins
-*.exe
-*.exe~
-*.dll
-*.so
-*.dylib
+# =============================================================================
+# OS
+# =============================================================================
+.DS_Store
+Thumbs.db
 
-# Test binary, built with `go test -c`
-*.test
-
-# Code coverage profiles and other test artifacts
-*.out
-coverage.*
-*.coverprofile
-profile.cov
-
-# Dependency directories (remove the comment below to include it)
-# vendor/
-
-# Go workspace file
+# =============================================================================
+# Go
+# =============================================================================
+# Workspace
 go.work
 go.work.sum
 
-# env file
-.env
+# Test binaries and output
+*.test
+tmp/
+test_outputs/
+temp-*.md
 
-# Editor/IDE
-# .idea/
-# .vscode/
+# Coverage
+*.out
+*.cover
+cover/
+coverage.txt
+
+# Binaries
+bin/
+
+# =============================================================================
+# Build & Release
+# =============================================================================
+dist/
+
+# Ko
+.digest
+
+# Cosign / Signing
+cosign.*
+*.pem
+
+# SBOM
+sbom.json
+
+# Test reports
+report.xml
+coverage.xml
+
+# Image digests
+digests.txt
+images.json
+
+
+# =============================================================================
+# Credentials & Secrets
+# =============================================================================
+.env
+.envrc.local
+
+# =============================================================================
+# IDEs
+# =============================================================================
+# VS Code
+.vscode/
+!.vscode/settings.json
+!.vscode/launch.json
+!.vscode/extensions.json
+
+# JetBrains (GoLand, IntelliJ)
+.idea/
+
+# Vim
+*.swp
+*.swo
+*~
+Session.vim
+.netrwhist
+tags
+
+# Emacs
+\#*\#
+.\#*
+
+# Claude
+.claude/settings.local.json
+.claude/worktrees/
+docs/plans
+docs/superpowers/
+.worktrees/
+
+# Per-clone local agent overlay (see AGENTS.md "Local Overlay" section)
+/AGENTS.local.md
+
+# Per-clone Claude Code personal overlay (auto-loaded alongside .claude/CLAUDE.md)
+/CLAUDE.local.md
