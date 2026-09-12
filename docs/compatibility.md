@@ -155,9 +155,12 @@ be accepted for the remainder of the major version.
 
 ## Supported platforms
 
-Linux and macOS, on amd64 and arm64. All four cells run the full suite on every
-push and all four gate a release, so byte identity across the matrix is a
-result rather than a claim.
+Linux and macOS, on amd64 and arm64 — four shipped targets.
+
+Three of them run the full suite on every push and gate a release:
+`linux/amd64`, `linux/arm64`, and `darwin/arm64`. `darwin/amd64` is built and
+vetted but not exercised, because its architecture and its filesystem are each
+covered by another cell. See docs/testing.md.
 
 Windows is not supported. Use WSL, where every guarantee holds exactly as
 written. See DP-035 for why.

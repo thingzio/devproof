@@ -59,15 +59,29 @@ jobs:
   # every cell is the claim DevProof makes, so it is tested on every push
   # rather than saved for release day.
   #
-  # Each cell runs the golden-vector tests, which assert exact bytes against
-  # committed fixtures. That is what makes this a determinism matrix rather
-  # than four independent test runs: identical fixture bytes on every
-  # architecture is the claim, and a per-cell failure localizes which cell
-  # broke it.
+  # Three cells, chosen for what they can actually catch:
   #
-  # The runner label and the platform it represents are both named, because
-  # the mapping is not obvious — macos-latest is arm64, not amd64 — and a
-  # label that silently changes architecture would quietly drop a cell.
+  #   linux/amd64   the baseline
+  #   linux/arm64   the architecture dimension
+  #   darwin/arm64  the operating-system dimension
+  #
+  # Architecture is the cheap one to be confident about: every integer written
+  # into a canonical byte stream goes through an explicit binary.BigEndian or
+  # binary.LittleEndian, there is no cgo and no unsafe, so native word order
+  # and alignment cannot reach the output. It is covered anyway, because
+  # "cannot" is a claim worth testing, and a Linux arm64 runner is cheap.
+  #
+  # The operating system is where real differences live: APFS folds case and
+  # ext4 does not, which is exactly what the path-collision rules exist for.
+  #
+  # darwin/amd64 is deliberately absent. Its architecture is covered by
+  # linux/amd64 and its filesystem by darwin/arm64, so it only ever repeated
+  # what two other cells already proved -- and it was the cell whose runner
+  # label kept being retired.
+  #
+  # Every release target is still cross-compiled and vetted in the build job,
+  # and goreleaser cross-compiles all four from one runner, so no architecture
+  # ships untested for compilation.
   test:
     name: test (${{ matrix.platform }})
     strategy:
@@ -76,16 +90,6 @@ jobs:
         include:
           - {os: ubuntu-latest, platform: linux/amd64}
           - {os: ubuntu-24.04-arm, platform: linux/arm64}
-          # macos-15-intel is the current Intel runner. macos-13 was retired,
-          # and a retired label does not fail -- it queues forever with no
-          # runner ever assigned, which hangs the whole run rather than
-          # reporting anything. The job timeout below is what turns that back
-          # into a failure.
-          #
-          # If GitHub ever repoints this label at Apple silicon, the
-          # architecture assertion turns it into a loud failure rather than a
-          # silently missing cell.
-          - {os: macos-15-intel, platform: darwin/amd64}
           - {os: macos-latest, platform: darwin/arm64}
     runs-on: ${{ matrix.os }}
     # A runner label that no longer exists queues indefinitely instead of

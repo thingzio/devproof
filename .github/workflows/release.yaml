@@ -11,8 +11,9 @@ permissions:
   contents: read
 
 jobs:
-  # Every platform a release ships binaries for, so a tag is never cut from
-  # a commit that was only ever tested on half the matrix.
+  # The same cells CI gates on. A release does not need one runner per shipped
+  # target: goreleaser cross-compiles all four from a single machine, so an
+  # architecture-specific runner buys running the tests there, nothing else.
   verify:
     name: verify (${{ matrix.platform }})
     runs-on: ${{ matrix.os }}
@@ -22,7 +23,6 @@ jobs:
         include:
           - {os: ubuntu-latest, platform: linux/amd64}
           - {os: ubuntu-24.04-arm, platform: linux/arm64}
-          - {os: macos-15-intel, platform: darwin/amd64}
           - {os: macos-latest, platform: darwin/arm64}
     timeout-minutes: 30
     steps:

@@ -145,15 +145,15 @@ devproof verify oci://<ref>:signed --key signer.pub.pem --policy policy.yaml
 
 ## Platforms
 
-| Platform | Build | Verify | Expand |
-| --- | --- | --- | --- |
-| Linux amd64 | yes | yes | yes |
-| Linux arm64 | yes | yes | yes |
-| macOS amd64 | yes | yes | yes |
-| macOS arm64 | yes | yes | yes |
+| Platform | Ships | Suite runs in CI |
+| --- | --- | --- |
+| Linux amd64 | yes | yes |
+| Linux arm64 | yes | yes |
+| macOS arm64 | yes | yes |
+| macOS amd64 | yes | built and vetted only |
 
-Every cell runs the full suite on every push and gates a release. Windows is
-not supported; use WSL (DP-035).
+Windows is not supported; use WSL (DP-035). See docs/testing.md for why three
+cells rather than four.
 
 ## Independent verification
 

@@ -1,7 +1,0 @@
-# actionlint validates runner labels against a built-in list that lags GitHub's
-# actual offerings. macos-15-intel is a real hosted label -- it replaced the
-# retired macos-13 -- but actionlint does not know it yet, and this is the
-# documented way to teach it one.
-self-hosted-runner:
-  labels:
-    - macos-15-intel

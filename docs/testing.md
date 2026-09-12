@@ -43,14 +43,30 @@ change adds a new format-version fixture rather than updating v1 expectations.
 
 ## Determinism matrix
 
-The same vectors run on every supported platform, and every cell gates:
+The same vectors run on three cells, and every cell gates:
 
-| Cell | Runner |
-| --- | --- |
-| `linux/amd64` | `ubuntu-latest` |
-| `linux/arm64` | `ubuntu-24.04-arm` |
-| `darwin/amd64` | `macos-15-intel` |
-| `darwin/arm64` | `macos-latest` |
+| Cell | Runner | Covers |
+| --- | --- | --- |
+| `linux/amd64` | `ubuntu-latest` | the baseline |
+| `linux/arm64` | `ubuntu-24.04-arm` | the architecture dimension |
+| `darwin/arm64` | `macos-latest` | the operating-system dimension |
+
+Four targets ship; three are tested. `darwin/amd64` is built and vetted on
+every push but its suite is not run, because its architecture is covered by
+`linux/amd64` and its filesystem by `darwin/arm64` — it only ever repeated what
+two other cells already proved.
+
+Architecture is the cheap dimension to be confident about here. Every integer
+written into a canonical byte stream goes through an explicit
+`binary.BigEndian` or `binary.LittleEndian`, and there is no cgo and no
+`unsafe`, so native word order and alignment cannot reach the output. It is
+tested anyway: "cannot" is a claim worth checking, and an arm64 Linux runner is
+cheap.
+
+The operating system is where the real differences are. APFS folds case and
+ext4 does not, which is precisely what the path-collision rules exist to
+handle, so a macOS cell earns its place on filesystem behavior rather than on
+instruction set.
 
 Each cell declares the platform it represents and asserts `go env GOARCH`
 against it. A runner label alone is not self-describing — `macos-latest` is

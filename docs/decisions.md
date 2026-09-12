@@ -602,9 +602,22 @@ first has no value.
 
 ## DP-035: POSIX only; Windows is out of scope
 
-Supported platforms are Linux and macOS on amd64 and arm64. All four cells run
-the full suite and all four gate a merge and a release, which is what makes
-"byte-identical across the matrix" a result rather than a claim.
+Supported platforms are Linux and macOS on amd64 and arm64 — four shipped
+targets, three tested cells: `linux/amd64`, `linux/arm64`, and `darwin/arm64`.
+All three gate a merge and a release, which is what makes "byte-identical
+across the matrix" a result rather than a claim.
+
+Three rather than four because the cells cover dimensions, not combinations.
+Architecture cannot reach canonical bytes — every integer written into one goes
+through an explicit byte order, with no cgo and no `unsafe` — and it is tested
+anyway on Linux arm64 because the claim is worth checking. The operating system
+genuinely can reach them, through case-folding and filesystem semantics, which
+darwin/arm64 covers. `darwin/amd64` is the intersection of two dimensions both
+already covered, and it was the cell whose runner label kept being retired.
+
+Arch-specific runners were never needed to *build*: goreleaser cross-compiles
+every target from one machine. They buy running the tests there, and nothing
+else, which is why the question is what each one can catch.
 
 Naming the runner label alone was not enough: `macos-latest` is arm64 and
 `ubuntu-latest` is amd64, so a matrix listing only those two silently covered
