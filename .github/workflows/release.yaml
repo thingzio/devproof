@@ -74,6 +74,10 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # A fine-grained PAT with contents:write on thingzio/homebrew-tap.
+          # Absent, .goreleaser.yaml skips the cask entirely rather than
+          # failing a cross-repo push, so a release works before this is set.
+          HOMEBREW_DEPLOY_KEY: ${{ secrets.HOMEBREW_DEPLOY_KEY }}
 
       # Provenance attests what built the archives and from which source. It
       # is produced by the workflow rather than by the build, so a compromised

@@ -86,6 +86,43 @@ signs:
     artifacts: checksum
     output: true
 
+# Homebrew tap (cask). Publishes into the shared org-wide tap
+# thingzio/homebrew-tap, so `brew install thingzio/tap/devproof` works.
+#
+# Guarded by HOMEBREW_DEPLOY_KEY: skip_upload is templated on the key so the
+# cask is neither uploaded nor probed when the key is absent, and no cross-repo
+# push is attempted until the secret exists. 'auto' additionally skips
+# prereleases even when it does.
+#
+# A cask rather than a formula: these are prebuilt, signed binaries, and a
+# formula would ask Homebrew to build from source -- which would produce a
+# binary nobody attested to, from a project whose entire subject is provenance.
+#
+# Ordering note: the cask is pushed while the GitHub release is still a draft,
+# because the release is only published after its signature verifies. The
+# window is the length of one job. A release that fails verification would
+# leave a cask pointing at a tag that never publishes, and the fix is to delete
+# the cask commit -- which is the right trade against publishing an unverified
+# release.
+homebrew_casks:
+  - name: devproof
+    repository:
+      owner: thingzio
+      name: homebrew-tap
+      token: '{{ .Env.HOMEBREW_DEPLOY_KEY }}'
+    homepage: https://github.com/thingzio/devproof
+    description: Build, verify, and expand immutable OCI bundles
+    skip_upload: '{{ if index .Env "HOMEBREW_DEPLOY_KEY" }}auto{{ else }}true{{ end }}'
+    # The binaries are signed but not Apple-notarized, so Gatekeeper would
+    # otherwise refuse to run them. Stripping the quarantine flag on install is
+    # what makes a downloaded CLI usable without a right-click dance.
+    hooks:
+      post:
+        install: |
+          if OS.mac?
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/devproof"]
+          end
+
 snapshot:
   version_template: '{{ incpatch .Version }}-next'
 

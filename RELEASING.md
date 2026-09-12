@@ -50,6 +50,26 @@ refused rather than warned about.
    only after verification succeeds, so a release is never visible before its
    signature has been checked.
 
+The Homebrew cask is pushed to `thingzio/homebrew-tap` during step 2, so
+`brew install thingzio/tap/devproof` picks up the new version.
+
+## The Homebrew tap
+
+The cask is published only when the repository has a `HOMEBREW_DEPLOY_KEY`
+secret: a fine-grained PAT with `contents: write` on `thingzio/homebrew-tap`.
+Without it goreleaser skips the cask rather than failing, so a release works
+before the secret exists and starts publishing the cask once it does.
+
+A cask rather than a formula, because these are prebuilt signed binaries. A
+formula would ask Homebrew to build from source, producing a binary nobody
+attested to — from a project whose subject is provenance.
+
+One ordering wrinkle: the cask is pushed while the GitHub release is still a
+draft, since publication waits for signature verification. A release that fails
+verification leaves a cask pointing at a tag that never publishes, and the fix
+is to revert that commit in the tap. That is the right trade against publishing
+a release nobody checked.
+
 ## Versioning
 
 [Semantic versioning](https://semver.org). No release has been cut yet, so the

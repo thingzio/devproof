@@ -25,11 +25,18 @@ that name and check it against your own rules before anything touches disk.
 ## Install
 
 ```bash
+brew install thingzio/tap/devproof
+```
+
+Or with Go:
+
+```bash
 go install github.com/thingzio/devproof/cmd/devproof@latest
 ```
 
-Prebuilt binaries for Linux and macOS (amd64 and arm64) ship with each release.
-Windows is not supported — use WSL ([DP-035](docs/decisions.md)).
+Prebuilt binaries for Linux and macOS (amd64 and arm64) ship with each release,
+each covered by a signed checksum file and an SBOM. Windows is not supported —
+use WSL ([DP-035](docs/decisions.md)).
 
 ## Quickstart
 
