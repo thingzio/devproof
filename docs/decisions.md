@@ -453,6 +453,82 @@ dependency tree at build time. That is the trade, taken deliberately. If it
 becomes a problem, the split is a separate module, not a change to these
 interfaces.
 
+## DP-030: Configuration cannot name an artifact
+
+The CLI resolves settings in one order: a command-line flag, then a
+`DEVPROOF_`-prefixed environment variable, then the configuration file, then
+the built-in default.
+
+The order is conventional and the alternatives are each worse. A file that
+overrode a flag would make a one-off override impossible. An environment
+variable that overrode a flag would let a CI runner's ambient settings
+silently win over what a script explicitly asked for.
+
+The file holds only settings that are safe to persist: output format,
+diagnostic level, timeout, and the trust material and policy to apply. It
+cannot name a reference, a destination, or a tag. A configuration file that
+could change *which* artifact a command acted on would make the same command
+line mean different things on different machines, and would turn a file into
+part of an artifact's attack surface.
+
+For the same reason the file is read from the per-user configuration directory
+and never from the working directory. A file discovered by walking upward
+would mean that cloning a repository and running a command inside it could
+change what that command does.
+
+Decoding is strict: an unknown key is an error. A misspelled setting is one
+that silently does not apply, and the failure surfaces much later as behavior
+nobody can explain.
+
+A configured policy can only make verification stricter. There is no setting
+that relaxes it, because a file that could turn integrity checking off would
+be the most valuable file on the machine to an attacker.
+
+## DP-031: Registry credentials come from the Docker configuration
+
+The CLI resolves credentials from `~/.docker/config.json` — the `auths`
+entries, `credHelpers`, and `credsStore` — rather than defining its own
+credential store.
+
+`docker login` is what every operator and CI runner has already run, and a
+tool that required a second, parallel login would mostly be used
+unauthenticated. Credential helpers are included because that is how cloud
+registries issue short-lived tokens; leaving them out would exclude ECR, GCR,
+and every other helper-based registry.
+
+Lookup is by host, and a host with no entry gets anonymous access rather than
+an error: public registries exist, and failing closed here would make an
+unauthenticated pull impossible on a machine that has never logged in.
+
+A credential is never offered to a host other than the one it was stored for,
+which is DP-013 applied to the CLI's own resolution: matching is on the full
+host, so neither a suffix nor a prefix of a configured registry attracts its
+credential.
+
+Helper results are cached per host for the process lifetime. A helper reaches
+the network, and a push touching one registry a few hundred times must not run
+a few hundred subprocesses.
+
+## DP-032: A gated expansion writes nothing when the policy fails
+
+`Expand` accepts a policy and evaluates it before extracting. An unsatisfied
+policy produces no destination at all.
+
+The alternative — extract, then evaluate, then clean up — was rejected because
+content that is written and later removed has already been readable by
+anything watching the directory. Cleanup is not the same guarantee as never
+having written it, and the entire reason to gate an expansion is that
+untrusted content must not reach the filesystem.
+
+This also closes a gap where the CLI accepted `--policy` on `expand` and
+silently ignored it, which advertised a gate that did not exist. A flag that
+claims to enforce something and does not is worse than no flag: it produces
+confident, unfounded trust.
+
+Verification remains three-dimensional here as everywhere else. Without a
+policy, expansion still checks integrity and reports trust as not-evaluated
+rather than as passing.
+
 ## Open decisions
 
 The following remain unresolved and are needed by the phase noted:

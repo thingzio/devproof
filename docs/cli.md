@@ -33,15 +33,19 @@ beyond executable loading, or making a network request.
 --timeout DURATION    overall operation timeout
 --no-color            disable color; NO_COLOR is also honored
 --non-interactive     prohibit prompts or browser/device-flow interaction
+--insecure-registry   use plain HTTP for registries
 ```
 
 `--quiet` and `--format json` are mutually exclusive unless a command defines
 the JSON value as its quiet output. `--debug` never changes the data written to
 stdout.
 
-The default timeout is command-specific and printed by help. A value of zero
-does not silently mean unbounded; unbounded behavior, if supported, requires an
-explicit spelling.
+The default timeout is 30 minutes for every command and is printed by help. A
+value of zero does not silently mean unbounded; unbounded behavior, if
+supported, requires an explicit spelling.
+
+`--insecure-registry` sends credentials and content in the clear and warns on
+stderr every time it is used.
 
 ## Configuration precedence
 
@@ -54,10 +58,29 @@ explicit flag > DEVPROOF_* environment variable > config file > built-in default
 Manifest, lock, and verification-policy data are not CLI settings and are not
 silently loaded from a user-global configuration file.
 
-The settings file may contain registry aliases, credential-provider names,
-timeouts, concurrency, limits, and output preferences. It may not contain raw
-tokens or private keys. `--debug` prints effective non-secret settings and
-their source.
+The settings file is read from the per-user configuration directory, or from
+`--config`. It is never discovered by searching the working directory or its
+ancestors: a file picked up from a cloned repository could otherwise change
+what a command does.
+
+It may contain `format`, `verbose`, `debug`, `noColor`, `timeout`, `policy`,
+`trustRoot`, `fulcioUrl`, and `rekorUrl`. It may not contain raw tokens or
+private keys, and it may not name a reference, destination, or tag — a file
+that could change *which* artifact a command acted on would make the same
+command line mean different things on different machines (DP-030).
+
+A configured `policy` can only make verification stricter. There is no setting
+that relaxes it.
+
+Decoding is strict: an unknown key is an error rather than a silently ignored
+setting.
+
+`--debug` prints effective non-secret settings and their source. Global
+settings are reported by the root command; a setting a subcommand owns is
+reported where it is resolved, because the root has not parsed it yet.
+
+An explicitly named `--config` that does not exist is an error. The default
+path not existing is not.
 
 ## Streams
 
@@ -172,7 +195,9 @@ Rules:
 
 - The subject and `--to` are required.
 - Integrity verification is mandatory and cannot be disabled.
-- Trust policy is optional unless required by configuration.
+- Trust policy is optional unless required by configuration. When a policy is
+  supplied it is evaluated *before* anything is written, and an unsatisfied
+  policy publishes no destination at all (DP-032).
 - The destination must not exist.
 - There is no `--force`, merge, strip-components, ownership, or permission
   preservation flag in v1.
@@ -199,9 +224,17 @@ referrer summaries. Full evidence payloads require `--evidence-content`.
 
 ## Authentication and interaction
 
-The CLI may use standard Git and registry credential helpers, environment
-variables, protected credential files, workload identity, or an explicitly
-configured OIDC provider.
+Registry credentials come from the Docker configuration — `DOCKER_CONFIG` or
+`~/.docker/config.json` — including `auths` entries, `credHelpers`, and
+`credsStore`. `docker login` is therefore all the setup there is, and
+helper-based cloud registries work without extra configuration (DP-031).
+
+A credential is looked up by host and is never offered to any other host. A
+registry with no entry gets anonymous access rather than an error, because
+public registries exist. A configured helper that is missing from `PATH`
+warns rather than failing, since the request may still succeed anonymously.
+
+Helper results are cached per host for the process lifetime.
 
 Tokens, passwords, and private keys are not accepted as ordinary flag values.
 Flags may name a credential provider or key reference.

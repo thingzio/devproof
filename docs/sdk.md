@@ -260,6 +260,11 @@ The absence of a policy produces `trust: not-evaluated`, not `pass`.
 `ExpandRequest` contains the subject, destination, verification policy, trust
 roots, and resource limits. It has no overwrite option in v1.
 
+A supplied policy is evaluated before extraction, and an unsatisfied policy
+writes nothing at all. Content that is written and then removed has already
+been readable by anything watching the directory, so cleaning up afterwards is
+not the same guarantee as never having written it (DP-032).
+
 `ExpandResult` is returned only after atomic publication. It contains the
 subject and tree digests, destination, file count, byte total, and verification
 summary.

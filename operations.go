@@ -668,7 +668,15 @@ type ExpandRequest struct {
 	// Destination must not exist. v1 has no overwrite or merge option.
 	Destination   string
 	RequireDigest bool
-	Limits        Limits
+
+	// Policy is the verification policy to apply before anything is written.
+	// Without one, trust reports not-evaluated rather than pass, exactly as
+	// it does for [Client.Verify].
+	Policy *policy.Document
+	// PolicyPath loads a policy from a file. Mutually exclusive with Policy.
+	PolicyPath string
+
+	Limits Limits
 }
 
 // ExpandResult describes a published expansion.
@@ -683,8 +691,14 @@ type ExpandResult struct {
 
 // Expand verifies a subject and materializes its payload.
 //
-// Integrity verification is mandatory and has no flag that disables it. The
-// result is returned only after the destination has been published, so a
+// Integrity verification is mandatory and has no flag that disables it. When a
+// policy is supplied it is evaluated before anything is written, and an
+// unsatisfied policy writes nothing at all: the whole point of gating an
+// expansion is that untrusted content never reaches the filesystem, and
+// content that is deleted after being written has already been available to
+// anything watching the directory.
+//
+// The result is returned only after the destination has been published, so a
 // non-nil result means the files are there, complete, and verified.
 func (c *Client) Expand(ctx context.Context, req ExpandRequest) (_ *ExpandResult, retErr error) {
 	if err := c.checkOpen(); err != nil {
@@ -696,13 +710,47 @@ func (c *Client) Expand(ctx context.Context, req ExpandRequest) (_ *ExpandResult
 
 	limits := c.effectiveLimits(req.Limits)
 
-	subject, pinned, err := c.loadSubject(ctx, VerifyRequest{
+	verification := VerifyRequest{
 		Reference:     req.Reference,
 		RequireDigest: req.RequireDigest,
+		Policy:        req.Policy,
+		PolicyPath:    req.PolicyPath,
 		Limits:        req.Limits,
-	})
+	}
+
+	doc, havePolicy, err := c.loadPolicy(verification)
 	if err != nil {
 		return nil, err
+	}
+	if havePolicy && doc.Spec.Subject.RequireDigestReference {
+		verification.RequireDigest = true
+	}
+
+	subject, pinned, err := c.loadSubject(ctx, verification)
+	if err != nil {
+		return nil, err
+	}
+
+	report := &policy.Report{
+		Integrity:     policy.StatusPass,
+		Trust:         policy.StatusNotEvaluated,
+		Semantics:     policy.StatusNotEvaluated,
+		SubjectDigest: subject.ManifestDigest.String(),
+		TreeDigest:    subject.TreeDigest.String(),
+		Format:        subject.Config.Format.String(),
+		FileCount:     subject.Config.FileCount,
+		TotalBytes:    subject.Config.TotalSize,
+	}
+	if havePolicy {
+		report, err = c.evaluatePolicy(ctx, doc, subject, pinned, verification)
+		if err != nil {
+			return nil, err
+		}
+		if !report.OK() {
+			return nil, fault.New(fault.CodePolicyFailed, "expand",
+				"the policy was not satisfied, so nothing was written").
+				WithPath(report.SubjectDigest)
+		}
 	}
 
 	transport, err := c.transportFor(pinned)
