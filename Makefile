@@ -15,6 +15,13 @@ GOVULNCHECK   := $(call version-of,govulncheck)
 SYFT          := $(call version-of,syft)
 GRYPE         := $(call version-of,grype)
 ACTIONLINT    := $(call version-of,actionlint)
+YAMLLINT      := $(call version-of,yamllint)
+GORELEASER    := $(call version-of,goreleaser)
+
+# The floor `make cover-check` enforces. Lives in .versions.yaml with every
+# other pinned number so a local run and the CI job cannot disagree about what
+# "enough coverage" means.
+COVERAGE_THRESHOLD := $(call version-of,coverage_threshold)
 
 MODULE        := github.com/thingzio/devproof
 BIN_DIR       := bin
@@ -42,6 +49,11 @@ help: ## Print this help
 tidy: ## Tidy and verify go.mod/go.sum
 	go mod tidy
 	go mod verify
+	$(MAKE) notices
+
+.PHONY: notices
+notices: ## Regenerate THIRD_PARTY_NOTICES.md from the build graph
+	python3 tools/gen-third-party-notices
 
 ##@ Build
 
@@ -56,12 +68,17 @@ build: ## Compile all packages, and the CLI once it exists
 	  CGO_ENABLED=0 go build -trimpath -ldflags '$(LDFLAGS)' -o $(BIN_DIR)/devproof ./cmd/devproof; \
 	  echo "built $(BIN_DIR)/devproof"; \
 	else \
-	  echo "cmd/devproof does not exist yet (phase 5); compiled packages only"; \
+	  echo "cmd/devproof is missing; compiled packages only"; \
 	fi
 
 .PHONY: clean
 clean: ## Remove build and coverage output
-	rm -rf $(BIN_DIR) $(COVERAGE_FILE) coverage.html
+	rm -rf $(BIN_DIR) $(COVERAGE_FILE) coverage.html sbom.json dist
+
+.PHONY: clean-all
+clean-all: clean ## Remove build output and the pinned tool cache
+	rm -rf $(TOOLS_DIR)
+	go clean -cache -testcache
 
 ##@ Test
 
@@ -123,6 +140,20 @@ lint: $(TOOLS_DIR)/golangci-lint ## Run golangci-lint
 fmt: $(TOOLS_DIR)/golangci-lint ## Apply formatters
 	golangci-lint fmt --config .golangci.yaml
 
+.PHONY: license
+license: ## Apply the license header to every first-party Go file
+	python3 tools/apply-license-headers
+
+.PHONY: license-check
+license-check: ## Fail if any first-party Go file is missing its license header
+	python3 tools/apply-license-headers --check
+
+.PHONY: lint-yaml
+lint-yaml: ## Lint YAML with the pinned yamllint
+	@command -v yamllint >/dev/null 2>&1 \
+	  || { echo "yamllint not installed: pipx install yamllint==$(YAMLLINT)"; exit 1; }
+	yamllint --strict .
+
 .PHONY: lint-actions
 lint-actions: $(TOOLS_DIR)/actionlint ## Lint GitHub Actions workflows
 	actionlint
@@ -175,12 +206,55 @@ sbom: $(TOOLS_DIR)/syft ## Generate a CycloneDX SBOM
 scan: sbom $(TOOLS_DIR)/grype ## Scan the SBOM for vulnerabilities
 	grype sbom:sbom.json --fail-on medium
 
+.PHONY: cover-check
+cover-check: cover ## Fail if coverage falls below the threshold
+	@total="$$(go tool cover -func=$(COVERAGE_FILE) | awk '/^total:/ {print $$3}' | tr -d '%')"; \
+	echo "coverage $${total}% (threshold $(COVERAGE_THRESHOLD)%)"; \
+	awk -v got="$${total}" -v want="$(COVERAGE_THRESHOLD)" \
+	  'BEGIN { exit (got + 0 >= want + 0) ? 0 : 1 }' \
+	  || { echo "coverage $${total}% is below the $(COVERAGE_THRESHOLD)% threshold"; exit 1; }
+
 ##@ Gates
 
 # What CI runs. Keep this the single definition of "green" so that a local
 # run and a pull-request run cannot disagree.
 .PHONY: qualify
-qualify: tidy fmt lint vet test-golden cover vuln ## Run the full pre-commit gate
+qualify: tidy license-check fmt lint lint-actions vet test-golden cover-check vuln ## Run the full pre-commit gate
+
+##@ Release
+
+.PHONY: info
+info: ## Print repository and toolchain state
+	@printf 'module        %s\n' '$(MODULE)'
+	@printf 'version       %s\n' '$(VERSION)'
+	@printf 'commit        %s\n' '$(COMMIT)'
+	@printf 'branch        %s\n' "$$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown)"
+	@printf 'go            %s\n' "$$(go env GOVERSION)"
+	@printf 'platform      %s/%s\n' "$$(go env GOOS)" "$$(go env GOARCH)"
+
+.PHONY: release
+release: ## Build a snapshot release locally without publishing anything
+	goreleaser release --snapshot --clean
+
+.PHONY: upgrade
+upgrade: ## Upgrade every Go dependency to its latest release
+	go get -u ./...
+	$(MAKE) tidy
+
+# Tagging is the one action that cannot be taken back: a tag names bytes other
+# people will verify against. tools/bump refuses a dirty tree, refuses
+# unpushed commits, and runs `make qualify` before it tags.
+.PHONY: bump-major
+bump-major: ## Tag and push the next major version (1.2.3 -> 2.0.0)
+	tools/bump major
+
+.PHONY: bump-minor
+bump-minor: ## Tag and push the next minor version (1.2.3 -> 1.3.0)
+	tools/bump minor
+
+.PHONY: bump-patch
+bump-patch: ## Tag and push the next patch version (1.2.3 -> 1.2.4)
+	tools/bump patch
 
 ##@ Tools
 

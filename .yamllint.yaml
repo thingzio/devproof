@@ -1,0 +1,12 @@
+extends: default
+
+ignore:
+  - vendor/
+  - dist/
+  - bin/
+
+rules:
+  line-length: disable
+  document-start: disable
+  document-end: disable
+  truthy: disable

@@ -23,6 +23,9 @@ outputs:
   grype:
     description: grype version
     value: ${{ steps.read.outputs.grype }}
+  yamllint:
+    description: yamllint version
+    value: ${{ steps.read.outputs.yamllint }}
 
 runs:
   using: composite
@@ -44,6 +47,6 @@ runs:
           fi
           echo "${key}=${value}" >> "$GITHUB_OUTPUT"
         }
-        for key in golangci_lint govulncheck actionlint goreleaser syft grype; do
+        for key in golangci_lint govulncheck actionlint goreleaser syft grype yamllint; do
           emit "${key}"
         done

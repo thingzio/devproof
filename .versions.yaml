@@ -11,8 +11,14 @@
 build_tools:
   # renovate: datasource=github-releases depName=goreleaser/goreleaser
   goreleaser: 'v2.18.1'
-  # renovate: datasource=github-releases depName=orhun/git-cliff
-  git_cliff: 'v2.14.1'
+
+# Quality gates. Numbers rather than tool versions, but they belong here for
+# the same reason: a threshold that lives only in a Makefile recipe and a
+# workflow step is a threshold the two will eventually disagree about.
+quality:
+  # The floor `make cover-check` enforces. Raise it as coverage improves;
+  # never lower it to make a red build green.
+  coverage_threshold: '75'
 
 # Static analysis and formatting.
 linting:
