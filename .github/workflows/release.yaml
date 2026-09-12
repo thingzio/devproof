@@ -25,10 +25,10 @@ jobs:
           - {os: macos-13, platform: darwin/amd64}
           - {os: macos-latest, platform: darwin/arm64}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           fetch-depth: 0
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
         with:
           go-version-file: .go-version
           check-latest: true
@@ -51,23 +51,23 @@ jobs:
       id-token: write
       attestations: write
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           fetch-depth: 0
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
         with:
           go-version-file: .go-version
           check-latest: true
       - id: versions
         uses: ./.github/actions/load-versions
 
-      - uses: anchore/sbom-action/download-syft@v0
+      - uses: anchore/sbom-action/download-syft@e22c389904149dbc22b58101806040fa8d37a610  # v0.24.0
         with:
           syft-version: ${{ steps.versions.outputs.syft }}
-      - uses: sigstore/cosign-installer@v3
+      - uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac  # v3.9.1
 
       - name: goreleaser
-        uses: goreleaser/goreleaser-action@v6
+        uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94  # v7.2.3
         with:
           version: ${{ steps.versions.outputs.goreleaser }}
           args: release --clean
@@ -78,9 +78,13 @@ jobs:
       # is produced by the workflow rather than by the build, so a compromised
       # build step cannot forge it.
       - name: attest build provenance
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be  # v2.4.0
         with:
-          subject-path: 'dist/*.tar.gz'
+          # Every archive, not just the tarballs: Windows ships zip, and an
+          # artifact with no provenance is one a consumer cannot check.
+          subject-path: |
+            dist/*.tar.gz
+            dist/*.zip
 
       - name: verify the release signature
         # Verified here rather than assumed: a signature nobody checks is a
@@ -93,3 +97,26 @@ jobs:
             --certificate-identity-regexp \
               "https://github\.com/${GITHUB_REPOSITORY}/\.github/workflows/release\.yaml@.*" \
             --certificate-oidc-issuer https://token.actions.githubusercontent.com
+
+  # goreleaser creates the release as a draft (`draft: true` in
+  # .goreleaser.yaml) so a release is never published before its signature has
+  # been verified above. Publishing is therefore a separate job -- without it
+  # the release stays a draft forever, which is invisible to everyone but
+  # repository collaborators and makes a repo with releases look like it has
+  # none.
+  #
+  # This is the same gap that left 55 devradar releases unpublished. Added here
+  # before the first tag rather than after.
+  publish:
+    needs: release
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: gh release edit "$TAG" --draft=false
