@@ -28,8 +28,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/thingzio/devproof/bundle"
 	"github.com/thingzio/devproof/internal/fault"
+	"github.com/thingzio/devproof/pkg/bundle"
 )
 
 // hostileArchive builds a gzip-compressed tar directly, bypassing the

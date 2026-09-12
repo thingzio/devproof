@@ -28,8 +28,8 @@ import (
 	"context"
 	"io"
 
-	"github.com/thingzio/devproof/bundle"
 	"github.com/thingzio/devproof/internal/canonical"
+	"github.com/thingzio/devproof/pkg/bundle"
 )
 
 // Resolver obtains material for one source type.

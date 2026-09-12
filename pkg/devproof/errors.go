@@ -17,8 +17,8 @@
 package devproof
 
 import (
-	"github.com/thingzio/devproof/bundle"
 	"github.com/thingzio/devproof/internal/fault"
+	"github.com/thingzio/devproof/pkg/bundle"
 )
 
 // Error is the error type every DevProof operation returns. Inspect it with

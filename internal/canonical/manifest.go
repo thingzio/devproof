@@ -20,9 +20,9 @@ import (
 	"bytes"
 	"encoding/json"
 
-	"github.com/thingzio/devproof/artifact"
-	"github.com/thingzio/devproof/bundle"
 	"github.com/thingzio/devproof/internal/fault"
+	"github.com/thingzio/devproof/pkg/artifact"
+	"github.com/thingzio/devproof/pkg/bundle"
 )
 
 const manifestOp = "canonical.manifest"

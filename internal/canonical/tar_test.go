@@ -25,9 +25,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/thingzio/devproof/bundle"
 	"github.com/thingzio/devproof/internal/fault"
 	"github.com/thingzio/devproof/internal/golden"
+	"github.com/thingzio/devproof/pkg/bundle"
 )
 
 // entry is a fixture file: content plus the record describing it.

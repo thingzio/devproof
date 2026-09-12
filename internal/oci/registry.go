@@ -38,10 +38,10 @@ import (
 	"oras.land/oras-go/v2/registry/remote/errcode"
 	"oras.land/oras-go/v2/registry/remote/retry"
 
-	"github.com/thingzio/devproof/artifact"
-	"github.com/thingzio/devproof/bundle"
 	"github.com/thingzio/devproof/internal/fault"
 	"github.com/thingzio/devproof/internal/version"
+	"github.com/thingzio/devproof/pkg/artifact"
+	"github.com/thingzio/devproof/pkg/bundle"
 )
 
 const registryOp = "oci.registry"

@@ -24,10 +24,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/thingzio/devproof/bundle"
 	"github.com/thingzio/devproof/internal/canonical"
 	"github.com/thingzio/devproof/internal/fault"
-	"github.com/thingzio/devproof/source"
+	"github.com/thingzio/devproof/pkg/bundle"
+	"github.com/thingzio/devproof/pkg/source"
 )
 
 // fakeSnapshot is an in-memory source contribution.

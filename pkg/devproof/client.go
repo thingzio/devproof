@@ -22,14 +22,14 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/thingzio/devproof/artifact"
-	"github.com/thingzio/devproof/bundle"
-	"github.com/thingzio/devproof/evidence"
 	"github.com/thingzio/devproof/internal/fault"
 	"github.com/thingzio/devproof/internal/oci"
-	"github.com/thingzio/devproof/source"
-	sourcegit "github.com/thingzio/devproof/source/git"
-	sourcepath "github.com/thingzio/devproof/source/path"
+	"github.com/thingzio/devproof/pkg/artifact"
+	"github.com/thingzio/devproof/pkg/bundle"
+	"github.com/thingzio/devproof/pkg/evidence"
+	"github.com/thingzio/devproof/pkg/source"
+	sourcegit "github.com/thingzio/devproof/pkg/source/git"
+	sourcepath "github.com/thingzio/devproof/pkg/source/path"
 )
 
 const clientOp = "devproof.client"

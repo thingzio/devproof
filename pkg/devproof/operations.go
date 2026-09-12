@@ -26,13 +26,13 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/thingzio/devproof/artifact"
-	"github.com/thingzio/devproof/bundle"
 	"github.com/thingzio/devproof/internal/canonical"
 	"github.com/thingzio/devproof/internal/fault"
 	"github.com/thingzio/devproof/internal/safefs"
-	"github.com/thingzio/devproof/policy"
-	sourcepath "github.com/thingzio/devproof/source/path"
+	"github.com/thingzio/devproof/pkg/artifact"
+	"github.com/thingzio/devproof/pkg/bundle"
+	"github.com/thingzio/devproof/pkg/policy"
+	sourcepath "github.com/thingzio/devproof/pkg/source/path"
 )
 
 // BuildRequest describes a bundle to build.

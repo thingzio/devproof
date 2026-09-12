@@ -21,7 +21,7 @@ import (
 	"strings"
 
 	"github.com/thingzio/devproof/internal/fault"
-	"github.com/thingzio/devproof/policy"
+	"github.com/thingzio/devproof/pkg/policy"
 )
 
 // usageError reports a command-line mistake.

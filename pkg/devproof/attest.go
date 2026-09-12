@@ -24,12 +24,12 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/thingzio/devproof/artifact"
-	"github.com/thingzio/devproof/bundle"
-	"github.com/thingzio/devproof/evidence"
 	"github.com/thingzio/devproof/internal/canonical"
 	"github.com/thingzio/devproof/internal/fault"
 	"github.com/thingzio/devproof/internal/version"
+	"github.com/thingzio/devproof/pkg/artifact"
+	"github.com/thingzio/devproof/pkg/bundle"
+	"github.com/thingzio/devproof/pkg/evidence"
 )
 
 const attestOp = "attest"

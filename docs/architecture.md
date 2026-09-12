@@ -233,24 +233,31 @@ Required measurements include:
 
 Metrics and logs are never inputs to artifact identity.
 
-## Proposed Go package boundaries
+## Go package boundaries
 
 ```text
 github.com/thingzio/devproof
-  client.go              top-level SDK facade
-  source/                public source contracts
-  source/path/           built-in local resolver
-  source/git/            built-in HTTPS Git resolver
-  bundle/                public spec, lock, inventory, and result types
-  artifact/              public artifact descriptors
-  evidence/              public evidence and attester contracts
-  policy/                public policy and verification result types
+  pkg/devproof/          top-level SDK facade
+  pkg/source/            public source contracts
+  pkg/source/path/       built-in local resolver
+  pkg/source/git/        built-in HTTPS Git resolver
+  pkg/bundle/            public spec, lock, inventory, and result types
+  pkg/artifact/          public artifact descriptors
+  pkg/evidence/          public evidence and attester contracts
+  pkg/policy/            public policy and verification result types
+  pkg/conformance/       independent format reader, shares no code (DP-034)
   internal/canonical/    path, record, JSON, tar, and gzip encoding
   internal/compose/      closed-world source composition
   internal/oci/          OCI layout and registry implementation
   internal/safefs/       snapshot and extraction protections
+  internal/cli/          command tree, output, credentials
+  internal/version/      build identity
   cmd/devproof/          CLI wiring only
 ```
+
+Everything importable lives under `pkg/`, so the repository root holds only
+`cmd`, `docs`, `internal`, `pkg`, and `tools`. `internal/` is the boundary the
+compiler enforces; `pkg/` is the one a reader can see at a glance.
 
 Only types that callers need to configure, extend, invoke, or inspect belong in
 public packages. Canonical byte production stays internal and is exposed

@@ -23,8 +23,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/thingzio/devproof"
-	"github.com/thingzio/devproof/bundle"
+	"github.com/thingzio/devproof/pkg/bundle"
+	"github.com/thingzio/devproof/pkg/devproof"
 )
 
 // writeManifest writes a manifest and the source trees it names, returning

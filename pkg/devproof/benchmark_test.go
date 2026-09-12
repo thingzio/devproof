@@ -25,7 +25,7 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/thingzio/devproof"
+	"github.com/thingzio/devproof/pkg/devproof"
 )
 
 // Benchmarks exist to turn the default resource limits from guesses into

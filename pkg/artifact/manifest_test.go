@@ -23,8 +23,8 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/thingzio/devproof/bundle"
 	"github.com/thingzio/devproof/internal/fault"
+	"github.com/thingzio/devproof/pkg/bundle"
 )
 
 // marshalManifest encodes m and returns its top-level keys, so a test can ask

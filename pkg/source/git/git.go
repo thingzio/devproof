@@ -40,11 +40,11 @@ import (
 	"github.com/go-git/go-git/v5/plumbing/object"
 	"github.com/go-git/go-git/v5/storage/memory"
 
-	"github.com/thingzio/devproof/bundle"
 	"github.com/thingzio/devproof/internal/canonical"
 	"github.com/thingzio/devproof/internal/fault"
 	"github.com/thingzio/devproof/internal/safefs"
-	"github.com/thingzio/devproof/source"
+	"github.com/thingzio/devproof/pkg/bundle"
+	"github.com/thingzio/devproof/pkg/source"
 )
 
 const op = "source.git"

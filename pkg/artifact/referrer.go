@@ -21,8 +21,8 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/thingzio/devproof/bundle"
 	"github.com/thingzio/devproof/internal/fault"
+	"github.com/thingzio/devproof/pkg/bundle"
 )
 
 const referrerOp = "artifact.referrer"

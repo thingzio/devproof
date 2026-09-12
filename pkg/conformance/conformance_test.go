@@ -24,8 +24,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/thingzio/devproof"
-	"github.com/thingzio/devproof/conformance"
+	"github.com/thingzio/devproof/pkg/conformance"
+	"github.com/thingzio/devproof/pkg/devproof"
 )
 
 // build produces a bundle with the main implementation and returns the layout

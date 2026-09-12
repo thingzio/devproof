@@ -23,8 +23,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/thingzio/devproof/bundle"
-	"github.com/thingzio/devproof/evidence"
+	"github.com/thingzio/devproof/pkg/bundle"
+	"github.com/thingzio/devproof/pkg/evidence"
 )
 
 // VerifiedEvidence is one evidence object whose signatures have been checked.

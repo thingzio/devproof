@@ -24,8 +24,8 @@ import (
 
 	"github.com/urfave/cli/v3"
 
-	"github.com/thingzio/devproof"
-	"github.com/thingzio/devproof/policy"
+	"github.com/thingzio/devproof/pkg/devproof"
+	"github.com/thingzio/devproof/pkg/policy"
 )
 
 // flagRequireDigest rejects a tag before anything is fetched. Shared by every

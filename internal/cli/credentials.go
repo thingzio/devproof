@@ -30,8 +30,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/thingzio/devproof/artifact"
 	"github.com/thingzio/devproof/internal/fault"
+	"github.com/thingzio/devproof/pkg/artifact"
 )
 
 // dockerConfig is the subset of ~/.docker/config.json that matters here.

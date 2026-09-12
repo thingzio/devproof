@@ -65,6 +65,8 @@ The SDK is the primary API and the CLI is a thin adapter over it, so anything
 you can do at the command line you can do in-process, without shelling out.
 
 ```go
+import "github.com/thingzio/devproof/pkg/devproof"
+
 client, err := devproof.New()
 if err != nil {
 	return err
@@ -212,13 +214,15 @@ signature.
 
 ## Don't take our word for it
 
-The [`conformance`](conformance) package is a second, independent reader of the
+The [`conformance`](pkg/conformance) package is a second, independent reader of the
 bundle format, built only from the Go standard library and the written
 specification. It imports nothing else from this project, so it is free to
 disagree with the main implementation — and when it did, it was the
 specification that turned out to be wrong.
 
 ```go
+import "github.com/thingzio/devproof/pkg/conformance"
+
 report, err := conformance.VerifyLayout("./artifact", "v1")
 ```
 

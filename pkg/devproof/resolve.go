@@ -24,11 +24,11 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
-	"github.com/thingzio/devproof/bundle"
 	"github.com/thingzio/devproof/internal/canonical"
 	"github.com/thingzio/devproof/internal/compose"
 	"github.com/thingzio/devproof/internal/fault"
-	"github.com/thingzio/devproof/source"
+	"github.com/thingzio/devproof/pkg/bundle"
+	"github.com/thingzio/devproof/pkg/source"
 )
 
 const resolveOp = "resolve"

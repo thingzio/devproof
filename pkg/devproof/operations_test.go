@@ -23,8 +23,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/thingzio/devproof"
-	"github.com/thingzio/devproof/policy"
+	"github.com/thingzio/devproof/pkg/devproof"
+	"github.com/thingzio/devproof/pkg/policy"
 )
 
 func newClient(t *testing.T, opts ...devproof.Option) *devproof.Client {

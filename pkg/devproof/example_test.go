@@ -22,8 +22,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/thingzio/devproof"
-	"github.com/thingzio/devproof/policy"
+	"github.com/thingzio/devproof/pkg/devproof"
+	"github.com/thingzio/devproof/pkg/policy"
 )
 
 // sampleTree writes a small source directory and returns its path.

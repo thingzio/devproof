@@ -30,7 +30,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/thingzio/devproof"
+	"github.com/thingzio/devproof/pkg/devproof"
 )
 
 // registryStub is a minimal OCI Distribution server, enough to exercise the

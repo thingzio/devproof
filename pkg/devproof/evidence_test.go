@@ -26,10 +26,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/thingzio/devproof"
-	"github.com/thingzio/devproof/bundle"
-	"github.com/thingzio/devproof/evidence"
-	"github.com/thingzio/devproof/policy"
+	"github.com/thingzio/devproof/pkg/bundle"
+	"github.com/thingzio/devproof/pkg/devproof"
+	"github.com/thingzio/devproof/pkg/evidence"
+	"github.com/thingzio/devproof/pkg/policy"
 )
 
 // signingClient returns a client that signs with a fresh local key and

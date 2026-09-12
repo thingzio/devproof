@@ -38,7 +38,7 @@ jobs:
         # The independent reader, run against the tagged tree. It shares no
         # code with the writer, so this is the check that the artifact matches
         # the specification rather than matching the code that produced it.
-        run: go test ./conformance/...
+        run: go test ./pkg/conformance/...
 
   release:
     needs: verify

@@ -121,14 +121,14 @@ fuzz: ## Run every fuzz target briefly as a smoke check
 # that must fail loudly when a refactor or dependency bump changes them.
 .PHONY: test-golden
 test-golden: ## Verify format golden vectors byte-for-byte
-	go test -race -count=1 -run 'TestGolden' ./internal/canonical/... ./bundle/...
+	go test -race -count=1 -run 'TestGolden' ./internal/canonical/... ./pkg/bundle/...
 
 .PHONY: regen-golden
 regen-golden: ## Regenerate golden vectors (only for a NEW format version)
 	@echo "Golden bytes are frozen for a released format version (DP-015)."
 	@echo "Regenerating is correct only when introducing a new format version."
 	@read -r -p "Type the new format version to continue: " v; test -n "$$v"
-	UPDATE_GOLDEN=1 go test -count=1 ./internal/canonical/... ./bundle/...
+	UPDATE_GOLDEN=1 go test -count=1 ./internal/canonical/... ./pkg/bundle/...
 
 ##@ Lint
 
