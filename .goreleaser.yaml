@@ -65,26 +65,17 @@ sboms:
     documents:
       - '${artifact}.spdx.json'
 
-# Keyless signing over the checksum file.
+# There is deliberately no `signs:` block.
 #
-# Signing the checksums rather than each archive is deliberate: the checksum
-# file already commits to every artifact by digest, so one signature covers
-# the whole release and there is exactly one thing to verify.
-# cosign v3 replaced the separate --output-certificate and --output-signature
-# flags with a single Sigstore bundle: signature, certificate, and the Rekor
-# inclusion proof in one file. One artifact to publish, one to verify, and the
-# inclusion proof travels with it so verification does not have to reach the
-# log.
-signs:
-  - cmd: cosign
-    signature: '${artifact}.bundle'
-    args:
-      - sign-blob
-      - '--bundle=${signature}'
-      - '${artifact}'
-      - --yes
-    artifacts: checksum
-    output: true
+# Signing moved into thingzio/actions' release-go.yaml, which does it in a job
+# holding no caller code -- the isolation that makes the provenance reach SLSA
+# Build Level 3 rather than 2. That workflow passes --skip=sign, so a block
+# here would not run at all: it would be a signature we believe we have and do
+# not. release-go.yaml refuses to build if one is present, for that reason.
+#
+# What it does is unchanged: one keyless signature over checksums.txt, which
+# already commits to every artifact by digest, delivered as a Sigstore bundle
+# carrying the certificate and the Rekor inclusion proof together.
 
 # Homebrew tap (cask). Publishes into the shared org-wide tap
 # thingzio/homebrew-tap, so `brew install thingzio/tap/devproof` works.
@@ -99,11 +90,18 @@ signs:
 # binary nobody attested to, from a project whose entire subject is provenance.
 #
 # Ordering note: the cask is pushed while the GitHub release is still a draft,
-# because the release is only published after its signature verifies. The
-# window is the length of one job. A release that fails verification would
-# leave a cask pointing at a tag that never publishes, and the fix is to delete
-# the cask commit -- which is the right trade against publishing an unverified
-# release.
+# because the release is only published after its signature verifies.
+#
+# That window used to be one job. Since releasing moved to the shared
+# release-go.yaml it spans the rest of the build job, all of the attest job --
+# which re-downloads every release asset, re-derives its digest, signs and
+# attests -- and the scheduling latency between them, which nothing bounds.
+# While it is open, `brew install thingzio/tap/devproof` resolves to a tag whose
+# assets are not downloadable.
+#
+# Still the right trade against publishing an unverified release, but the fix
+# when attest fails is to revert the cask commit in the tap, and that is now
+# minutes rather than seconds of exposure.
 homebrew_casks:
   - name: devproof
     repository:
@@ -130,7 +128,15 @@ changelog:
   use: github-native
 
 release:
+  # The release is created before it is signed, so it stays invisible until
+  # release-go.yaml's attest job has verified the signature and its publish job
+  # flips this. Without it there would be a public, unsigned release for the
+  # length of the attest job.
   draft: true
+  # GitHub does not return drafts when looking a release up by tag, so without
+  # this a re-run cannot see the draft it made last time and opens a second one
+  # for the same tag.
+  use_existing_draft: true
   prerelease: auto
   footer: |
     ## Verifying this release
@@ -141,16 +147,25 @@ release:
     ```bash
     cosign verify-blob checksums.txt \
       --bundle checksums.txt.bundle \
-      --certificate-identity-regexp 'https://github\.com/thingzio/devproof/\.github/workflows/release\.yaml@.*' \
+      --certificate-identity-regexp '^https://github\.com/thingzio/actions/\.github/workflows/release-go\.yaml@' \
       --certificate-oidc-issuer https://token.actions.githubusercontent.com
 
     sha256sum --check --ignore-missing checksums.txt
     ```
 
-    Build provenance is attested separately and can be verified with:
+    The signer is the shared build definition in `thingzio/actions`, not this
+    repository. That is the SLSA Build Level 3 property made checkable: the
+    signing identity lives in a job no code from this repository can reach.
+
+    Build provenance is attested separately:
 
     ```bash
-    gh attestation verify devproof_*_linux_amd64.tar.gz --repo thingzio/devproof
+    gh attestation verify devproof_*_linux_amd64.tar.gz \
+      --repo thingzio/devproof \
+      --signer-workflow thingzio/actions/.github/workflows/release-go.yaml
     ```
+
+    `--signer-workflow` is what distinguishes Level 3 from Level 2. Without it
+    the check passes for provenance signed by any workflow in this repository.
 
     An SBOM in SPDX form accompanies each archive.
