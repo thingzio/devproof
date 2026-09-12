@@ -49,13 +49,18 @@ The same vectors run on every supported platform, and every cell gates:
 | --- | --- |
 | `linux/amd64` | `ubuntu-latest` |
 | `linux/arm64` | `ubuntu-24.04-arm` |
-| `darwin/amd64` | `macos-13` |
+| `darwin/amd64` | `macos-15-intel` |
 | `darwin/arm64` | `macos-latest` |
 
 Each cell declares the platform it represents and asserts `go env GOARCH`
 against it. A runner label alone is not self-describing — `macos-latest` is
 arm64 — so a matrix that named only labels could silently cover half the cells
 while reading as though it covered all of them.
+
+Every cell also carries a job timeout. A retired runner label does not fail: it
+queues forever with no runner ever assigned, which hangs the whole run instead
+of reporting anything. `macos-13` did exactly that before it was replaced by
+`macos-15-intel`.
 
 Windows is not supported (DP-035). Every release target is additionally
 cross-compiled and vetted on every push, so a platform-specific build tag fails
