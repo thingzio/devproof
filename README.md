@@ -1,44 +1,26 @@
 # DevProof
 
-DevProof is a Go-embeddable, extensible, multi-source artifact bundler with
-canonical identity across platforms, provenance evidence, policy-based
-verification, and safe deterministic expansion.
+[![ci](https://github.com/thingzio/devproof/actions/workflows/ci.yaml/badge.svg)](https://github.com/thingzio/devproof/actions/workflows/ci.yaml)
+[![Go Reference](https://pkg.go.dev/badge/github.com/thingzio/devproof.svg)](https://pkg.go.dev/github.com/thingzio/devproof)
+[![Go Report Card](https://goreportcard.com/badge/github.com/thingzio/devproof)](https://goreportcard.com/report/github.com/thingzio/devproof)
+[![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 
-It turns files from local directories, Git repositories, and future source
-types into immutable OCI artifacts that can be verified, redistributed, and
-expanded back into their canonical filesystem form.
+**Package files into OCI artifacts that are byte-identical everywhere, provably
+from where you say, and safe to unpack.**
 
-> **Project status:** implemented and testable, not yet released. Everything
-> below works today. There is no tagged release, the Go API is `v1alpha1`, and
-> the bundle format is frozen but not yet declared stable — see
+Configuration, policies, scripts, and catalogs get assembled from several
+places that all move independently. Put them in a tarball and you have bytes
+nobody can say much about: not what was selected, not where it came from, not
+whether it changed, not who stands behind it.
+
+DevProof gives that pile a **name derived from its content** — a digest that is
+the same on every machine, forever — then lets you attach signed evidence to
+that name and check it against your own rules before anything touches disk.
+
+> **Status:** implemented and tested, no tagged release yet. The Go API is
+> `v1alpha1`. The bundle format is frozen but not yet declared stable; see
 > [compatibility](docs/compatibility.md) for what each version number will
 > promise.
-
-## Why DevProof
-
-Configuration, policies, scripts, catalogs, and other filesystem resources are
-often assembled from several mutable locations. Copying them into an archive
-does not establish exactly what was selected, where it came from, whether it
-changed, or which identities a consumer should trust.
-
-DevProof separates those concerns:
-
-1. A manifest describes the intended sources and where each source is mounted.
-2. A generated lock resolves mutable references to immutable material.
-3. The selected files are normalized into a canonical filesystem tree.
-4. The tree is encoded as a deterministic OCI artifact.
-5. Provenance and signatures are attached as evidence without changing the
-   artifact's identity.
-6. Consumers verify integrity and evidence against their own policy before
-   safely expanding the files.
-
-```text
-sources -> manifest -> lock -> canonical tree -> OCI subject @ sha256:...
-                                                      |
-                                  signatures and provenance evidence
-                                                      |
-                                  verify -> safely expand to filesystem
-```
 
 ## Install
 
@@ -46,72 +28,131 @@ sources -> manifest -> lock -> canonical tree -> OCI subject @ sha256:...
 go install github.com/thingzio/devproof/cmd/devproof@latest
 ```
 
-Or build from a checkout:
+Prebuilt binaries for Linux and macOS (amd64 and arm64) ship with each release.
+Those four are gated in CI on every push; Windows is built best-effort
+([DP-035](docs/decisions.md)).
 
-```bash
-make build     # ./bin/devproof
-```
+## Quickstart
 
-Supported and gated in CI: Linux and macOS on amd64 and arm64. Windows binaries
-are built best-effort ([DP-035](docs/decisions.md)).
-
-## Try it
-
-```bash
+```console
 $ devproof build ./content --to oci-layout://./artifact --tag v1
 reference:       oci-layout://./artifact@sha256:e3d8f68bd8c485...
 subject:         sha256:e3d8f68bd8c485...
 tree digest:     sha256:168de0126f4a8c...
 format:          devproof-bundle-v1
 files:           2
-tag:             v1
 
 $ devproof verify oci-layout://./artifact:v1
 subject:         sha256:e3d8f68bd8c485...
 integrity:       pass
 trust:           not-evaluated
 semantics:       not-evaluated
-  [warning] policy-not-supplied: no verification policy was supplied, so trust
-  was not evaluated; integrity alone does not establish that this artifact came
-  from anyone in particular
 
 $ devproof expand oci-layout://./artifact:v1 --to ./expanded
 ```
 
-Building the same tree again — on any supported platform, in any directory, at
-any time — produces that same subject digest. That is the property everything
-else rests on.
+Run the build again — different directory, different machine, next year — and
+the subject digest is the same. Everything else here rests on that.
 
-`trust: not-evaluated` is deliberate, and is not a synonym for `pass`. Integrity
-says the bytes are what the artifact claims; it says nothing about who produced
-them. Supply a `--policy` to evaluate trust.
+Swap `oci-layout://` for `oci://registry.example.com/team/config` to work
+against a registry. Credentials come from your Docker configuration, so
+`docker login`, `gh auth login`, or `gcloud auth configure-docker` is the whole
+setup.
 
-## Capabilities
+## Use it from Go
 
-- Go SDK as the primary API, with a thin CLI over the same operations.
-- Multiple named sources composed through explicit mount paths.
-- Built-in local-path and HTTPS Git sources.
-- Explicit SDK extension points for additional sources, transports, attesters,
-  and policy evaluators.
-- Human-authored manifests and canonical machine-generated locks.
-- Stable tree and OCI subject digests for the same canonical content across
-  supported platforms.
-- Deterministic filesystem-to-OCI-to-filesystem-to-OCI round trips.
-- OCI image-layout and registry publication, retrieval, and copy by digest.
-- in-toto provenance and Sigstore-compatible signatures attached as OCI
-  referrers.
-- Policy checks for signer identity, provenance, immutable source resolution,
-  evidence requirements, and resource limits.
-- Closed-world inventory verification before publication or expansion.
-- Safe extraction with path validation, resource limits, private staging, and
-  atomic destination publication.
-- Stable JSON results, typed Go errors, bounded retries, timeouts, and
-  cancellation.
+The SDK is the primary API and the CLI is a thin adapter over it, so anything
+you can do at the command line you can do in-process, without shelling out.
 
-## Manifest
+```go
+client, err := devproof.New()
+if err != nil {
+	return err
+}
+defer func() { _ = client.Close() }()
 
-A bundle manifest declares one or more sources. Mutable references are allowed
-in the manifest but must be resolved into the lock before a reproducible build.
+built, err := client.Build(ctx, devproof.BuildRequest{
+	SourcePath:  "./content",
+	Destination: "oci://registry.example.com/team/config",
+	Tag:         "v1",
+})
+if err != nil {
+	return err
+}
+
+// Expansion is gated: if the policy is not satisfied, nothing is written.
+_, err = client.Expand(ctx, devproof.ExpandRequest{
+	Reference:   built.Reference,
+	Destination: "./expanded",
+	PolicyPath:  "policy.yaml",
+})
+```
+
+Full reference on [pkg.go.dev](https://pkg.go.dev/github.com/thingzio/devproof).
+
+## Verification answers three separate questions
+
+Most tools collapse these into one boolean. Keeping them apart is the point.
+
+| Dimension | Question | Needs |
+| --- | --- | --- |
+| **integrity** | Are these the bytes the artifact claims? | nothing — always checked |
+| **trust** | Who produced them, and do I accept that? | a policy |
+| **semantics** | Is the content valid for my use? | a validator you supply |
+
+A dimension you did not ask about reports `not-evaluated`, **never `pass`**. If
+your trust configuration silently failed to load, you will see
+`trust: not-evaluated` rather than a green check — which is the difference
+between knowing and assuming.
+
+```yaml
+apiVersion: devproof.thingz.io/v1alpha1
+kind: VerificationPolicy
+metadata:
+  name: release-gate
+spec:
+  subject:
+    requireDigestReference: true
+  signatures:
+    threshold: 1
+    identities:
+      - issuer: https://token.actions.githubusercontent.com
+        subjectPattern: ^https://github\.com/example/config/\.github/workflows/release\.yaml@refs/tags/v.*$
+  provenance:
+    required: true
+    requireLockDigest: true
+```
+
+```bash
+devproof verify oci://registry.example.com/team/config@sha256:... --policy policy.yaml
+```
+
+Exit code `0` means the policy was satisfied. A failed policy exits non-zero,
+so a CI gate built on this cannot pass by accident.
+
+## How it works
+
+```text
+sources ──▶ manifest ──▶ lock ──▶ canonical tree ──▶ OCI subject @ sha256:…
+                                                            │
+                                        signed provenance, attached as
+                                        referrers — identity unchanged
+                                                            │
+                                        verify ──▶ safely expand to disk
+```
+
+A **manifest** says what you want, and may name moving things — a branch, a
+local directory. A **lock** records what those resolved to, so "what did you
+ask for" and "what did you get" stay independently reviewable. The files are
+normalized into a **canonical tree**, encoded deterministically, and named by
+digest.
+
+**Evidence is attached to that name, not baked into it.** Signing, re-signing,
+or copying an artifact never changes its digest — so a signature can be added
+later without invalidating every reference to the content.
+
+Multi-source builds compose through explicit mount paths, with one owner per
+path. Collisions fail loudly, even when the colliding bytes are identical.
 
 ```yaml
 apiVersion: devproof.thingz.io/v1alpha1
@@ -127,7 +168,6 @@ spec:
         url: https://github.com/example/application.git
         ref: main
         subPath: deploy
-
     - name: environment
       type: path
       mountPath: environment
@@ -135,99 +175,74 @@ spec:
         path: ./production
 ```
 
-The generated `devproof.lock.json` records the resolved Git commit, source tree
-digests, filters, final path ownership, file inventory, and canonical bundle
-tree digest. A locked build fails rather than silently accepting changed
-material.
+## Safe by construction
 
-## CLI workflow
+- **Expansion is staged and atomic.** Files land in a private directory and are
+  published with an exclusive rename. A failed, canceled, or hostile
+  extraction leaves no destination — not a partial one that looks finished.
+- **A gated expansion writes nothing when the policy fails.** Content that is
+  written and then deleted was already readable.
+- **Nothing from a bundle is executed.** No hooks, no validators, no plugins.
+- **The portable profile** rejects symlinks, device files, path aliases,
+  Windows reserved names, and case-fold collisions, so a bundle that builds is
+  a bundle that expands everywhere.
+- **Bounded by default** — file counts, sizes, compression ratios, and path
+  depth all have documented limits, and memory does not scale with payload
+  size.
 
-```bash
-# Resolve mutable source references and create the lock.
-devproof lock -f devproof.yaml
+## Works with what you already have
 
-# Build and publish the locked content.
-devproof build -f devproof.yaml \
-  --lock devproof.lock.json \
-  --to oci://registry.example.com/team/config:v1
+A DevProof artifact is an ordinary OCI artifact. `skopeo`, `crane`, and `oras`
+copy it with the digest intact; GHCR, Google Artifact Registry, and
+`distribution` all store and serve it, referrers API included. The layer is
+plain `tar+gzip` — GNU, BSD, and busybox `tar` all unpack it directly.
 
-# Verify the immutable subject and its evidence.
-devproof verify registry.example.com/team/config@sha256:... \
-  --policy policy.yaml
+Verified results and commands to reproduce them:
+[interoperability](docs/interoperability.md).
 
-# Verify and atomically materialize the canonical files.
-devproof expand registry.example.com/team/config@sha256:... \
-  --to ./expanded \
-  --policy policy.yaml
-```
+## What it is not
 
-A single local directory can be built directly, without a manifest:
+Not a deployment engine, dependency solver, registry server, container runtime,
+secrets manager, or package manager.
 
-```bash
-devproof build ./content --to oci-layout://./artifact
-```
+DevProof proves identity, integrity, provenance, and policy compliance. It
+makes **no claim** that the content inside is correct, safe, or free of
+vulnerabilities — a perfectly valid signature on malware is still a valid
+signature.
 
-Git material goes through a manifest, which is what produces the lock that
-records the resolved commit.
+## Don't take our word for it
 
-Registry credentials come from the Docker configuration, so `docker login`,
-`gh auth`, or `gcloud auth configure-docker` is the whole setup.
-
-## Identity and evidence
-
-The OCI subject is derived only from the canonical payload and bundle-format
-version. Source URLs, timestamps, builder identity, registry location, tags,
-signatures, and attestations do not affect that digest.
-
-Evidence names the immutable subject digest and may describe its sources,
-builder, invocation, and signing identity. Evidence can therefore be added,
-renewed, or copied without changing the payload artifact.
-
-DevProof proves artifact identity, integrity, provenance, and policy compliance
-under the supplied trust policy. It does not claim that payload content is
-correct, safe, vulnerability-free, or semantically valid.
-
-## Boundaries
-
-DevProof is not a deployment engine, dependency solver, registry server,
-container runtime, secrets manager, or general package manager. It does not
-execute files or validators discovered inside a bundle.
-
-The initial portable filesystem profile supports regular files and implicit
-directories. It normalizes permissions and rejects links, special files, path
-aliases, and ambiguous collisions so that consumers do not depend on
-platform-specific archive behavior.
-
-## Design documentation
-
-The implementation contracts are documented in [docs](docs/README.md):
-
-- [design decisions](docs/decisions.md);
-- [architecture](docs/architecture.md);
-- [manifest and lock specification](docs/manifest.md);
-- [bundle format](docs/bundle-format.md);
-- [Go SDK](docs/sdk.md) and [CLI](docs/cli.md);
-- [verification policy](docs/policy.md) and [security design](docs/security.md);
-  and
-- [test strategy](docs/testing.md) and [implementation roadmap](docs/roadmap.md);
-- [interoperability results](docs/interoperability.md) against other OCI
-  tooling and registries; and
-- [compatibility and migration policy](docs/compatibility.md).
-
-## Verifying the claims yourself
-
-The `conformance` package is a second reader of the bundle format, built only
-from the Go standard library and the format specification. It imports no other
-DevProof package, so it can disagree with the main implementation — and it is
-how the specification is checked against what the code actually produces
-rather than against itself.
+The [`conformance`](conformance) package is a second, independent reader of the
+bundle format, built only from the Go standard library and the written
+specification. It imports nothing else from this project, so it is free to
+disagree with the main implementation — and when it did, it was the
+specification that turned out to be wrong.
 
 ```go
 report, err := conformance.VerifyLayout("./artifact", "v1")
 ```
 
-Contributions are welcome; see [CONTRIBUTING](CONTRIBUTING.md).
+## Documentation
+
+| | |
+| --- | --- |
+| [Architecture](docs/architecture.md) | components, data flow, failure behavior |
+| [Bundle format](docs/bundle-format.md) | canonical model, tree digest, OCI encoding |
+| [Manifest and lock](docs/manifest.md) | sources, resolution, filtering, composition |
+| [Go SDK](docs/sdk.md) · [CLI](docs/cli.md) | operations, errors, exit codes, streams |
+| [Verification policy](docs/policy.md) | trust rules and result semantics |
+| [Security](docs/security.md) | threat model, trust boundaries, safe extraction |
+| [Decisions](docs/decisions.md) | every accepted design decision, and why |
+| [Compatibility](docs/compatibility.md) | what each version number promises |
+| [Interoperability](docs/interoperability.md) | verified results against other tooling |
+| [Testing](docs/testing.md) | golden vectors, determinism matrix, fuzzing |
+
+## Contributing
+
+Issues and pull requests are welcome — see [CONTRIBUTING](CONTRIBUTING.md) for
+the development workflow, and [SECURITY](SECURITY.md) to report a vulnerability
+privately.
 
 ## License
 
-DevProof is licensed under the [Apache License 2.0](LICENSE).
+[Apache License 2.0](LICENSE).
