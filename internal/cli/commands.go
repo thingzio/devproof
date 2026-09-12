@@ -182,10 +182,13 @@ func (a *App) verifyCommand() *cli.Command {
 			defer func() { _ = client.Close() }()
 
 			a.printer.Progress().Step("verifying %s", reference)
+			policyPath := a.setting(cmd, "policy", a.config.Policy)
+			a.warnUnusedTrustMaterial(cmd, policyPath)
+
 			report, err := client.Verify(ctx, devproof.VerifyRequest{
 				Reference:     reference,
 				RequireDigest: cmd.Bool(flagRequireDigest),
-				PolicyPath:    a.setting(cmd, "policy", a.config.Policy),
+				PolicyPath:    policyPath,
 			})
 			if err != nil {
 				return err
@@ -241,11 +244,14 @@ func (a *App) expandCommand() *cli.Command {
 			defer func() { _ = client.Close() }()
 
 			a.printer.Progress().Step("verifying and expanding %s", reference)
+			policyPath := a.setting(cmd, "policy", a.config.Policy)
+			a.warnUnusedTrustMaterial(cmd, policyPath)
+
 			result, err := client.Expand(ctx, devproof.ExpandRequest{
 				Reference:     reference,
 				Destination:   cmd.String("to"),
 				RequireDigest: cmd.Bool(flagRequireDigest),
-				PolicyPath:    a.setting(cmd, "policy", a.config.Policy),
+				PolicyPath:    policyPath,
 			})
 			if err != nil {
 				return err
@@ -377,6 +383,29 @@ func (a *App) inspectCommand() *cli.Command {
 				renderInspect(w, result)
 			})
 		},
+	}
+}
+
+// warnUnusedTrustMaterial reports trust material that cannot take effect.
+//
+// Supplying --key or --trust-root and no policy is a reasonable thing to
+// expect to work, and it does not: trust is evaluated only when a policy asks
+// for it (DP-010), so the key is loaded and never consulted. Reporting
+// "no verification policy was supplied" to someone who just supplied a key
+// answers a question they did not ask. Saying which flag was ignored, and
+// what to add, is the difference between a confusing result and an
+// actionable one.
+func (a *App) warnUnusedTrustMaterial(cmd *cli.Command, policyPath string) {
+	if policyPath != "" {
+		return
+	}
+	switch {
+	case len(cmd.StringSlice("key")) > 0:
+		a.printer.Warn("--key was supplied but no policy requires a signature, " +
+			"so the key was not consulted; add --policy to evaluate trust")
+	case cmd.String("trust-root") != "":
+		a.printer.Warn("--trust-root was supplied but no policy requires a signature, " +
+			"so it was not consulted; add --policy to evaluate trust")
 	}
 }
 

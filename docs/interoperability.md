@@ -96,18 +96,52 @@ ordinary, not to consume the artifact.
 The transport uses only the OCI Distribution Spec 1.1.1 pull, push, and
 referrers APIs, with no registry-specific behavior.
 
+| Registry | Push / pull | Tag and digest | Referrers API | Signed evidence |
+| --- | --- | --- | --- | --- |
+| distribution `registry:3` | yes | yes | native | yes |
+| GitHub Container Registry | yes | yes | native | yes |
+| Google Artifact Registry | yes | yes | native | yes |
+
+All three produce the same subject digest for the same source tree, and the
+same digest a local layout produces. That is the claim worth testing: identity
+is a function of content, so a registry is not part of it.
+
+Cross-registry copy was verified GHCR to GAR. The digest is unchanged by
+definition — a repository name is not content — and the copy verifies at the
+destination.
+
 The referrers API is the one place where registries genuinely differ. A
 registry that does not implement it causes evidence to be discovered through
 the fallback tag scheme, which is reported rather than silently used, and which
 a policy must opt into (DP-028). A consumer therefore always knows which
-mechanism produced the evidence it is judging.
+mechanism produced the evidence it is judging. All three registries above
+report `storage: referrers`, so the fallback was not exercised against a real
+registry; it has unit coverage only.
 
-Tested: `registry:3` (distribution), which implements referrers natively.
+Credentials come from the Docker configuration in every case, so
+`docker login`, `gh auth`, or `gcloud auth configure-docker` is the whole
+setup. Two registries can sit in one configuration file and each credential is
+offered only to its own host (DP-013), which the cross-registry copy above
+exercises directly.
 
-Untested here, because they need accounts rather than code: GHCR, ECR, GAR,
-ACR, Docker Hub, Quay, Artifactory, Harbor, and Nexus. The harness above is
-what to point at them — set `DEVPROOF_INSECURE_REGISTRY` aside, authenticate
-with `docker login`, and run the same sequence.
+Untested, because they need accounts rather than code: ECR, ACR, Docker Hub,
+Quay, Artifactory, Harbor, and Nexus. The sequence below is what to point at
+them.
+
+```bash
+# GHCR
+echo "$GITHUB_TOKEN" | docker login ghcr.io -u "$USER" --password-stdin
+devproof build ./src --to oci://ghcr.io/<owner>/<name> --tag v1
+
+# Artifact Registry
+gcloud auth configure-docker us-central1-docker.pkg.dev
+devproof build ./src --to oci://us-central1-docker.pkg.dev/<project>/<repo>/<name> --tag v1
+
+# Then, against either:
+devproof verify oci://<ref>:v1
+devproof build ./src --to oci://<ref> --tag signed --sign --key signer.pem
+devproof verify oci://<ref>:signed --key signer.pub.pem --policy policy.yaml
+```
 
 ## Independent verification
 

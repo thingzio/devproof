@@ -3,7 +3,12 @@ package cli_test
 import (
 	"bytes"
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/x509"
 	"encoding/json"
+	"encoding/pem"
 	"os"
 	"path/filepath"
 	"strings"
@@ -738,4 +743,72 @@ func TestCLIRoundTrip(t *testing.T) {
 		t.Errorf("a command-line round trip changed the subject:\n  %s\n  %s",
 			originalDigest, rebuiltDigest)
 	}
+}
+
+// Trust material with no policy cannot take effect, and saying so is what
+// separates a confusing result from an actionable one. Without the warning,
+// someone who supplied a key is told "no verification policy was supplied",
+// which answers a question they did not ask.
+func TestUnusedTrustMaterialWarns(t *testing.T) {
+	t.Parallel()
+
+	layout := filepath.Join(t.TempDir(), "layout")
+	if got := run(t, "build", sourceTree(t), "--to", "oci-layout://"+layout, "--tag", "v1"); got.code != 0 {
+		t.Fatalf("fixture build failed: %s", got.stderr)
+	}
+
+	got := run(t, "verify", "oci-layout://"+layout+":v1", "--key", writePublicKey(t))
+
+	if got.code != fault.ExitSuccess {
+		t.Fatalf("exit = %d: %s", got.code, got.stderr)
+	}
+	if !strings.Contains(got.stderr, "--key was supplied but no policy") {
+		t.Errorf("no warning that the key could not take effect:\n%s", got.stderr)
+	}
+	// The warning is a diagnostic, so it must not reach a piped result.
+	if strings.Contains(got.stdout, "--key") {
+		t.Errorf("the warning reached stdout:\n%s", got.stdout)
+	}
+}
+
+// With a policy the key is consulted, so there is nothing to warn about.
+func TestTrustMaterialWithPolicyDoesNotWarn(t *testing.T) {
+	t.Parallel()
+
+	layout := filepath.Join(t.TempDir(), "layout")
+	if got := run(t, "build", sourceTree(t), "--to", "oci-layout://"+layout, "--tag", "v1"); got.code != 0 {
+		t.Fatalf("fixture build failed: %s", got.stderr)
+	}
+
+	got := run(t, "verify", "oci-layout://"+layout+":v1",
+		"--key", writePublicKey(t), "--policy", writeUnsatisfiablePolicy(t))
+
+	if strings.Contains(got.stderr, "was supplied but no policy") {
+		t.Errorf("warned despite a policy being supplied:\n%s", got.stderr)
+	}
+}
+
+// writePublicKey writes a throwaway P-256 public key and returns its path.
+//
+// Generated rather than hard-coded: the tests above check whether the key is
+// consulted, not what it proves, and a generated key cannot rot into an
+// invalid encoding that makes them fail for the wrong reason.
+func writePublicKey(t *testing.T) string {
+	t.Helper()
+
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generating a key: %v", err)
+	}
+	encoded, err := x509.MarshalPKIXPublicKey(&key.PublicKey)
+	if err != nil {
+		t.Fatalf("encoding the key: %v", err)
+	}
+
+	path := filepath.Join(t.TempDir(), "key.pub.pem")
+	body := pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: encoded})
+	if err := os.WriteFile(path, body, 0o644); err != nil {
+		t.Fatalf("writing the key: %v", err)
+	}
+	return path
 }
