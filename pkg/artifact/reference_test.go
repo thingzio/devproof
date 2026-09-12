@@ -267,3 +267,57 @@ func TestReferenceLocator(t *testing.T) {
 		t.Error("a layout reference reports IsRegistry")
 	}
 }
+
+// A Windows absolute path carries a colon in its drive designator, and a
+// layout reference carries that path verbatim. Reading the drive colon as a
+// tag separator split "C:\dir\layout" into the repository "C" and the tag
+// "\dir\layout", so every build on Windows collided with its own --tag.
+//
+// Run on every platform on purpose: this is string parsing, and a layout
+// reference written on Windows is read on Linux.
+func TestWindowsDrivePathIsNotATag(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		raw  string
+		tag  string
+	}{
+		{"backslash drive path", `oci-layout://C:\Users\runner\Temp\layout`, ""},
+		{"forward slash drive path", "oci-layout://C:/Users/runner/Temp/layout", ""},
+		{"drive path with a tag", `oci-layout://C:\Temp\layout:v1`, "v1"},
+		{"relative path with a tag", "oci-layout://./layout:v1", "v1"},
+		{"relative path, no tag", "oci-layout://./layout", ""},
+		{"registry port is not a tag", "oci://registry.example.com:5000/team/config", ""},
+		{"registry port with a tag", "oci://registry.example.com:5000/team/config:v1", "v1"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			ref, err := ParseReference(tc.raw)
+			if err != nil {
+				t.Fatalf("ParseReference(%q): %v", tc.raw, err)
+			}
+			if ref.Tag != tc.tag {
+				t.Errorf("ParseReference(%q).Tag = %q, want %q", tc.raw, ref.Tag, tc.tag)
+			}
+		})
+	}
+}
+
+// The drive letter must survive into the path, not be eaten as a repository.
+func TestWindowsDrivePathRoundTrips(t *testing.T) {
+	t.Parallel()
+
+	const raw = `oci-layout://C:\Users\runner\Temp\layout`
+
+	ref, err := ParseReference(raw)
+	if err != nil {
+		t.Fatalf("ParseReference: %v", err)
+	}
+	if ref.Path != `C:\Users\runner\Temp\layout` {
+		t.Errorf("Path = %q, want the full drive path", ref.Path)
+	}
+}

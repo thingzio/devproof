@@ -169,12 +169,27 @@ func splitLocator(raw string) (path, tag, digest string, err error) {
 	// The tag is parsed out of the remainder even when a digest was present,
 	// so that a reference carrying both is detected rather than silently
 	// folding the tag into the path.
-	lastSlash := strings.LastIndex(base, "/")
-	if colon := strings.LastIndex(base, ":"); colon > lastSlash {
+	//
+	// A colon only introduces a tag when nothing after it is a path
+	// separator. That rules out a registry port -- "registry:5000/repo" --
+	// and equally a Windows drive designator, where the path is
+	// "C:\Users\...". A tag cannot contain a separator under the OCI
+	// grammar, so anything that does is not one.
+	if colon := strings.LastIndex(base, ":"); colon > lastPathSeparator(base) {
 		tag = base[colon+1:]
 		base = base[:colon]
 	}
 	return base, tag, digest, nil
+}
+
+// lastPathSeparator returns the last index of either separator, or -1.
+//
+// Both are checked regardless of the host platform: a layout reference written
+// on Windows travels in manifests, locks, and scripts that are read on Linux,
+// and a parser whose answer depends on where it runs would make the same
+// string mean two different things.
+func lastPathSeparator(s string) int {
+	return max(strings.LastIndex(s, "/"), strings.LastIndex(s, `\`))
 }
 
 func (r Reference) validate(raw string) error {
