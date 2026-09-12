@@ -30,3 +30,15 @@ updates:
     groups:
       github-actions:
         patterns: ["*"]
+
+  # The composite action has its own action.yaml with its own `uses:` refs.
+  # Dependabot only scans directories it is told about, so without this entry
+  # those pins never get updates -- the gap that left devtrace with two
+  # different versions of the same action pinned in one repository.
+  - package-ecosystem: github-actions
+    directory: .github/actions/load-versions
+    schedule:
+      interval: weekly
+    groups:
+      github-actions:
+        patterns: ["*"]
