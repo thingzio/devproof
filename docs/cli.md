@@ -239,9 +239,14 @@ Helper results are cached per host for the process lifetime.
 Tokens, passwords, and private keys are not accepted as ordinary flag values.
 Flags may name a credential provider or key reference.
 
-Browser opening or device authorization occurs only when explicitly enabled,
-stderr is an interactive terminal, and `--non-interactive` is absent. Otherwise
-the command fails with instructions for supplying non-interactive credentials.
+Nothing prompts, opens a browser, or reads a terminal. Keyless signing uses an
+ambient OIDC token — the one a CI runner already has — and fails with an
+explanation when none is available rather than starting a device flow.
+
+`--non-interactive` is therefore satisfied unconditionally today. It exists so
+a script can assert the guarantee rather than discover later that some path
+began prompting; any interactive flow added in future must read it before
+prompting.
 
 ## Cancellation
 

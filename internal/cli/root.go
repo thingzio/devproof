@@ -216,8 +216,16 @@ func (a *App) globalFlags() []cli.Flag {
 		&cli.BoolFlag{
 			Name:  "non-interactive",
 			Usage: "prohibit prompts and browser interaction",
-			// Also honored from CI, because a CI run that blocks on a prompt
-			// hangs until someone notices rather than failing.
+			// Nothing in DevProof prompts, opens a browser, or reads a
+			// terminal: the SDK is forbidden from doing so (DP-001) and the
+			// CLI has no interactive flow. The flag is therefore satisfied
+			// unconditionally today, and exists so that a script can assert
+			// the guarantee rather than discover later that some path started
+			// prompting. Honored from CI as well, because a CI run that blocks
+			// on a prompt hangs until someone notices rather than failing.
+			//
+			// Any future interactive path must read this flag before
+			// prompting. The test below is what keeps that honest.
 			Sources: cli.EnvVars(envPrefix+"NON_INTERACTIVE", "CI"),
 		},
 		&cli.BoolFlag{
