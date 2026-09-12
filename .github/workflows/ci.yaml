@@ -50,6 +50,11 @@ jobs:
       # a file eventually slips through.
       - name: license headers
         run: make license-check
+      # A secret committed and then removed is still published: the object
+      # stays reachable in the history, in every fork, and in every cache. The
+      # only version of this check that helps runs before the push.
+      - name: secrets
+        run: make secrets
       - name: go mod tidy is committed
         run: |
           go mod tidy

@@ -37,6 +37,8 @@ security_tools:
   syft: 'v1.33.0'
   # renovate: datasource=go depName=golang.org/x/vuln
   govulncheck: 'v1.1.4'
+  # renovate: datasource=github-releases depName=gitleaks/gitleaks
+  gitleaks: 'v8.30.0'
 
 # Integration-test infrastructure. Pinned by digest where the test asserts
 # registry behavior: a moving tag would silently change what "a conformant

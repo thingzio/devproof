@@ -14,6 +14,7 @@ GOLANGCI_LINT := $(call version-of,golangci_lint)
 GOVULNCHECK   := $(call version-of,govulncheck)
 SYFT          := $(call version-of,syft)
 GRYPE         := $(call version-of,grype)
+GITLEAKS      := $(call version-of,gitleaks)
 ACTIONLINT    := $(call version-of,actionlint)
 YAMLLINT      := $(call version-of,yamllint)
 GORELEASER    := $(call version-of,goreleaser)
@@ -202,6 +203,11 @@ vuln: $(TOOLS_DIR)/govulncheck ## Scan for known vulnerabilities
 sbom: $(TOOLS_DIR)/syft ## Generate a CycloneDX SBOM
 	syft scan dir:. -o cyclonedx-json=sbom.json
 
+.PHONY: secrets
+secrets: $(TOOLS_DIR)/gitleaks ## Scan the working tree and full history for secrets
+	gitleaks dir --no-banner --redact .
+	gitleaks git --no-banner --redact .
+
 .PHONY: scan
 scan: sbom $(TOOLS_DIR)/grype ## Scan the SBOM for vulnerabilities
 	grype sbom:sbom.json --fail-on medium
@@ -219,7 +225,7 @@ cover-check: cover ## Fail if coverage falls below the threshold
 # What CI runs. Keep this the single definition of "green" so that a local
 # run and a pull-request run cannot disagree.
 .PHONY: qualify
-qualify: tidy license-check fmt lint lint-actions vet test-golden cover-check vuln ## Run the full pre-commit gate
+qualify: tidy license-check fmt lint lint-actions vet test-golden cover-check vuln secrets ## Run the full pre-commit gate
 
 ##@ Release
 
@@ -269,6 +275,9 @@ $(TOOLS_DIR)/govulncheck: | $(TOOLS_DIR)
 
 $(TOOLS_DIR)/actionlint: | $(TOOLS_DIR)
 	GOBIN=$(TOOLS_DIR) go install github.com/rhysd/actionlint/cmd/actionlint@$(ACTIONLINT)
+
+$(TOOLS_DIR)/gitleaks: | $(TOOLS_DIR)
+	GOBIN=$(TOOLS_DIR) go install github.com/zricethezav/gitleaks/v8@$(GITLEAKS)
 
 $(TOOLS_DIR)/syft: | $(TOOLS_DIR)
 	GOBIN=$(TOOLS_DIR) go install github.com/anchore/syft/cmd/syft@$(SYFT)

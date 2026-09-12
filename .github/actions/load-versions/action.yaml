@@ -26,6 +26,9 @@ outputs:
   yamllint:
     description: yamllint version
     value: ${{ steps.read.outputs.yamllint }}
+  gitleaks:
+    description: gitleaks version
+    value: ${{ steps.read.outputs.gitleaks }}
 
 runs:
   using: composite
@@ -47,6 +50,6 @@ runs:
           fi
           echo "${key}=${value}" >> "$GITHUB_OUTPUT"
         }
-        for key in golangci_lint govulncheck actionlint goreleaser syft grype yamllint; do
+        for key in golangci_lint govulncheck actionlint goreleaser syft grype yamllint gitleaks; do
           emit "${key}"
         done

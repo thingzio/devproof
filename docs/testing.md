@@ -286,6 +286,18 @@ CLI tests use an in-process SDK with controlled dependencies and assert:
 
 Examples in CLI help and documentation run as tests.
 
+## Secret and license scanning
+
+`make secrets` runs gitleaks over the working tree and the full history, and it
+gates. Scanning only the working tree would miss the case that matters: a
+secret committed and then removed is still published, because the object stays
+reachable in the history, in every fork, and in every cache. The only version
+of this check that helps runs before the push.
+
+`make notices` regenerates `THIRD_PARTY_NOTICES.md` from the build graph, and
+`make tidy` calls it, so a dependency cannot enter the binary without its
+license being recorded.
+
 ## Release gates
 
 A release candidate must pass:
