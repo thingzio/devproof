@@ -92,8 +92,7 @@ jobs:
         # publishing artifacts whose signature does not verify.
         run: |
           cosign verify-blob dist/checksums.txt \
-            --certificate dist/checksums.txt.pem \
-            --signature dist/checksums.txt.sig \
+            --bundle dist/checksums.txt.bundle \
             --certificate-identity-regexp \
               "https://github\.com/${GITHUB_REPOSITORY}/\.github/workflows/release\.yaml@.*" \
             --certificate-oidc-issuer https://token.actions.githubusercontent.com

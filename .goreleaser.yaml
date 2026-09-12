@@ -77,13 +77,17 @@ sboms:
 # Signing the checksums rather than each archive is deliberate: the checksum
 # file already commits to every artifact by digest, so one signature covers
 # the whole release and there is exactly one thing to verify.
+# cosign v3 replaced the separate --output-certificate and --output-signature
+# flags with a single Sigstore bundle: signature, certificate, and the Rekor
+# inclusion proof in one file. One artifact to publish, one to verify, and the
+# inclusion proof travels with it so verification does not have to reach the
+# log.
 signs:
   - cmd: cosign
-    certificate: '${artifact}.pem'
+    signature: '${artifact}.bundle'
     args:
       - sign-blob
-      - '--output-certificate=${certificate}'
-      - '--output-signature=${signature}'
+      - '--bundle=${signature}'
       - '${artifact}'
       - --yes
     artifacts: checksum
@@ -106,8 +110,7 @@ release:
 
     ```bash
     cosign verify-blob checksums.txt \
-      --certificate checksums.txt.pem \
-      --signature checksums.txt.sig \
+      --bundle checksums.txt.bundle \
       --certificate-identity-regexp 'https://github\.com/thingzio/devproof/\.github/workflows/release\.yaml@.*' \
       --certificate-oidc-issuer https://token.actions.githubusercontent.com
 
