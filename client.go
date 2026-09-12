@@ -6,6 +6,9 @@ import (
 
 	"github.com/thingzio/devproof/bundle"
 	"github.com/thingzio/devproof/internal/fault"
+	"github.com/thingzio/devproof/source"
+	sourcegit "github.com/thingzio/devproof/source/git"
+	sourcepath "github.com/thingzio/devproof/source/path"
 )
 
 const clientOp = "devproof.client"
@@ -18,10 +21,11 @@ const clientOp = "devproof.client"
 // call os.Exit, print, prompt, or open a browser — those are a command-line
 // program's business, and a library that does them cannot be embedded.
 type Client struct {
-	limits   bundle.Limits
-	tempRoot string
-	logger   *slog.Logger
-	closed   bool
+	limits    bundle.Limits
+	tempRoot  string
+	logger    *slog.Logger
+	resolvers map[string]source.Resolver
+	closed    bool
 }
 
 // Option configures a Client.
@@ -34,8 +38,14 @@ type Option func(*Client) error
 // output to stderr.
 func New(opts ...Option) (*Client, error) {
 	c := &Client{
-		limits: bundle.DefaultLimits(),
-		logger: slog.New(discardHandler{}),
+		limits:    bundle.DefaultLimits(),
+		logger:    slog.New(discardHandler{}),
+		resolvers: make(map[string]source.Resolver),
+	}
+	// The built-in resolvers are registered first so an application can
+	// replace one deliberately, rather than being unable to.
+	for _, builtin := range []source.Resolver{sourcepath.New(), sourcegit.New()} {
+		c.resolvers[builtin.Type()] = builtin
 	}
 	for _, opt := range opts {
 		if opt == nil {
@@ -61,6 +71,37 @@ func WithLimits(limits Limits) Option {
 			return err
 		}
 		c.limits = limits.WithDefaults()
+		return nil
+	}
+}
+
+// WithResolver registers a source resolver, replacing any resolver already
+// registered for the same type.
+//
+// Registration is explicit and per-client. There is no global registry, no
+// plugin loading, and nothing discovered from a bundle, so the set of things
+// that can fetch material during a build is exactly what the embedding
+// application chose (DP-009).
+func WithResolver(resolver source.Resolver) Option {
+	return func(c *Client) error {
+		if resolver == nil {
+			return fault.New(fault.CodeInvalidInput, clientOp, "resolver must not be nil")
+		}
+		if resolver.Type() == "" {
+			return fault.New(fault.CodeInvalidInput, clientOp, "resolver has no source type")
+		}
+		c.resolvers[resolver.Type()] = resolver
+		return nil
+	}
+}
+
+// WithAbsolutePathSources allows path sources to name absolute paths.
+//
+// Off by default: a manifest that reaches outside its own directory is not
+// portable, and a manifest that does so by accident should say so loudly.
+func WithAbsolutePathSources() Option {
+	return func(c *Client) error {
+		c.resolvers[bundle.SourceTypePath] = &sourcepath.Resolver{AllowAbsolute: true}
 		return nil
 	}
 }

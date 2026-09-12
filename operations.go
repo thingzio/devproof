@@ -3,6 +3,8 @@ package devproof
 import (
 	"context"
 	stderrors "errors"
+	"os"
+	"path/filepath"
 
 	"github.com/thingzio/devproof/bundle"
 	"github.com/thingzio/devproof/internal/canonical"
@@ -10,19 +12,42 @@ import (
 	"github.com/thingzio/devproof/internal/oci"
 	"github.com/thingzio/devproof/internal/safefs"
 	"github.com/thingzio/devproof/policy"
+	sourcepath "github.com/thingzio/devproof/source/path"
 )
 
 // BuildRequest describes a bundle to build.
 //
-// Phase 1 supports a direct local-path source and a local OCI layout
-// destination. Manifest-driven multi-source builds and registry destinations
-// arrive in later phases behind the same operation boundary.
+// A build is driven by either a manifest or a single direct source, never
+// both. Direct mode synthesizes a one-source manifest and runs the identical
+// pipeline, so there is no second implementation whose behavior could drift.
 type BuildRequest struct {
-	// SourcePath is the local directory to package.
+	// SpecPath is a manifest file to build from.
+	SpecPath string
+	// Spec is a manifest supplied in memory. SpecDir gives the directory
+	// relative source paths resolve against.
+	Spec    *bundle.Spec
+	SpecDir string
+
+	// SourcePath builds a single local directory directly, without a
+	// manifest. Mutually exclusive with SpecPath and Spec.
 	SourcePath string
-	// MountPath places the source below a prefix in the bundle. Empty mounts
-	// at the root.
+	// MountPath places a direct source below a prefix.
 	MountPath string
+	// Include and Exclude filter a direct source.
+	Include []string
+	Exclude []string
+
+	// LockPath is the lock to enforce. When a manifest build finds a lock
+	// beside the manifest, it is enforced by default (DP-004).
+	LockPath string
+	// Lock is a lock supplied in memory.
+	Lock *bundle.Lock
+	// UpdateLock resolves afresh and writes a new lock rather than enforcing
+	// the existing one. Never implied: a build does not silently relock.
+	UpdateLock bool
+	// SkipLock builds without a lock at all.
+	SkipLock bool
+
 	// LayoutPath is the OCI image layout to write. It is created if absent.
 	LayoutPath string
 	// Tag optionally names the subject in the layout index.
@@ -36,22 +61,30 @@ type BuildRequest struct {
 // Every identifier is a digest. A tag is reported separately and never stands
 // in for one (DP-007).
 type BuildResult struct {
-	SubjectDigest string
-	TreeDigest    string
-	ConfigDigest  string
-	LayerDigest   string
-	Format        string
-	FileCount     int64
-	TotalBytes    int64
-	LayerBytes    int64
-	LayoutPath    string
-	Tag           string
+	SubjectDigest  string
+	TreeDigest     string
+	ConfigDigest   string
+	LayerDigest    string
+	ManifestDigest string
+	LockDigest     string
+	Format         string
+	FileCount      int64
+	TotalBytes     int64
+	LayerBytes     int64
+	LayoutPath     string
+	Tag            string
+
+	// Lock is the resolution this build used, whether loaded or generated.
+	Lock *bundle.Lock
+	// LockBytes is its canonical encoding, for a caller that wants to
+	// persist it.
+	LockBytes []byte
 }
 
-// Build packages a source tree into an OCI image layout.
+// Build packages one or more sources into an OCI image layout.
 //
-// Content is snapshotted into private storage before anything is encoded, so
-// the artifact describes one frozen moment rather than a directory that may
+// Sources are resolved into private snapshots before anything is encoded, so
+// the artifact describes one frozen moment rather than directories that may
 // be changing underneath it. Blobs are written before the manifest, and the
 // tag is assigned last, so a name never points at content that is not
 // completely present.
@@ -59,33 +92,59 @@ func (c *Client) Build(ctx context.Context, req BuildRequest) (_ *BuildResult, r
 	if err := c.checkOpen(); err != nil {
 		return nil, err
 	}
-	if req.SourcePath == "" {
-		return nil, fault.New(fault.CodeInvalidInput, "build", "a source path is required")
-	}
 	if req.LayoutPath == "" {
 		return nil, fault.New(fault.CodeInvalidInput, "build", "a destination layout path is required")
 	}
 
+	spec, baseDir, err := c.loadSpec(req)
+	if err != nil {
+		return nil, err
+	}
+
+	lock, haveLock, err := c.loadLock(req, baseDir)
+	if err != nil {
+		return nil, err
+	}
+
 	limits := c.effectiveLimits(req.Limits)
 
-	snapshot, err := safefs.SnapshotDir(ctx, req.SourcePath, safefs.SnapshotOptions{
-		MountPath: req.MountPath,
-		Limits:    limits.Limits,
-		TempRoot:  c.tempRoot,
-	})
+	resolved, err := c.resolveSpec(ctx, spec, baseDir, lock, limits.Limits)
 	if err != nil {
 		return nil, err
 	}
 	defer func() {
-		if closeErr := snapshot.Close(); closeErr != nil && retErr == nil {
+		if closeErr := resolved.close(); closeErr != nil && retErr == nil {
 			retErr = closeErr
 		}
 	}()
 
-	records := snapshot.Records()
+	records := resolved.composed.Records
 	if len(records) == 0 {
 		return nil, fault.New(fault.CodeInvalidInput, "build",
-			"source selected no files; a bundle must contain at least one")
+			"the manifest selected no files; a bundle must contain at least one")
+	}
+
+	treeDigest, err := canonical.TreeDigest(records)
+	if err != nil {
+		return nil, err
+	}
+
+	// A locked build compares before it packages, so a stale lock costs a
+	// resolution rather than a published artifact.
+	if haveLock {
+		if lockErr := resolved.verifyAgainstLock(lock, treeDigest); lockErr != nil {
+			return nil, lockErr
+		}
+	} else {
+		lock, err = resolved.buildLock(treeDigest)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	lockDigest, lockBytes, err := canonical.JSONDigest(lock)
+	if err != nil {
+		return nil, err
 	}
 
 	layout, err := openOrCreateLayout(req.LayoutPath)
@@ -103,7 +162,7 @@ func (c *Client) Build(ctx context.Context, req BuildRequest) (_ *BuildResult, r
 	// its digest. Phase 3 replaces this with a staged blob write for
 	// registry-sized payloads.
 	var layerBuffer sizedBuffer
-	subject, err := canonical.Package(ctx, records, snapshot, &layerBuffer)
+	subject, err := canonical.Package(ctx, records, resolved.composed, &layerBuffer)
 	if err != nil {
 		return nil, err
 	}
@@ -126,21 +185,284 @@ func (c *Client) Build(ctx context.Context, req BuildRequest) (_ *BuildResult, r
 
 	c.logger.InfoContext(ctx, "built bundle",
 		"subject", subject.ManifestDigest.String(),
+		"sources", len(spec.Spec.Sources),
 		"files", subject.Config.FileCount,
 		"layout", layout.Path())
 
 	return &BuildResult{
-		SubjectDigest: subject.ManifestDigest.String(),
-		TreeDigest:    subject.TreeDigest.String(),
-		ConfigDigest:  subject.ConfigDigest.String(),
-		LayerDigest:   subject.LayerDigest.String(),
-		Format:        subject.Config.Format.String(),
-		FileCount:     subject.Config.FileCount,
-		TotalBytes:    subject.Config.TotalSize,
-		LayerBytes:    subject.LayerSize,
-		LayoutPath:    layout.Path(),
-		Tag:           req.Tag,
+		SubjectDigest:  subject.ManifestDigest.String(),
+		TreeDigest:     subject.TreeDigest.String(),
+		ConfigDigest:   subject.ConfigDigest.String(),
+		LayerDigest:    subject.LayerDigest.String(),
+		ManifestDigest: resolved.manifestDigest.String(),
+		LockDigest:     lockDigest.String(),
+		Format:         subject.Config.Format.String(),
+		FileCount:      subject.Config.FileCount,
+		TotalBytes:     subject.Config.TotalSize,
+		LayerBytes:     subject.LayerSize,
+		LayoutPath:     layout.Path(),
+		Tag:            req.Tag,
+		Lock:           lock,
+		LockBytes:      lockBytes,
 	}, nil
+}
+
+// LockRequest describes a lock to produce.
+//
+// It has no destination and no signing mode: locking resolves sources and
+// records what they resolved to, and mixing publication into that would make
+// "what does this manifest mean" a question you cannot answer without a
+// registry.
+type LockRequest struct {
+	SpecPath string
+	Spec     *bundle.Spec
+	SpecDir  string
+
+	// OutputPath is where to write the lock. Empty defaults to
+	// devproof.lock.json beside the manifest.
+	OutputPath string
+	// Check verifies an existing lock without writing anything.
+	Check bool
+	// ExistingLock is compared against when Check is set. Empty loads from
+	// OutputPath.
+	ExistingLock *bundle.Lock
+
+	Limits Limits
+}
+
+// LockResult describes a lock.
+type LockResult struct {
+	Lock           *bundle.Lock
+	LockBytes      []byte
+	LockDigest     string
+	ManifestDigest string
+	TreeDigest     string
+	SourceCount    int
+	FileCount      int
+	OutputPath     string
+	// Matched reports whether an existing lock already described this
+	// resolution. Under Check, a false value is a failure.
+	Matched bool
+}
+
+// Lock resolves a manifest and records the resolution.
+//
+// Writing is atomic and all-or-nothing: a manifest whose sources partly fail
+// produces no lock at all, because a lock describing some of a manifest is
+// worse than none (DP-011).
+func (c *Client) Lock(ctx context.Context, req LockRequest) (_ *LockResult, retErr error) {
+	if err := c.checkOpen(); err != nil {
+		return nil, err
+	}
+
+	spec, baseDir, err := c.loadSpec(BuildRequest{
+		SpecPath: req.SpecPath, Spec: req.Spec, SpecDir: req.SpecDir,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	outputPath := req.OutputPath
+	if outputPath == "" {
+		outputPath = filepath.Join(baseDir, DefaultLockName)
+	}
+
+	limits := c.effectiveLimits(req.Limits)
+
+	// Resolved without a lock: locking is how a lock comes into existence,
+	// so enforcing one here would be circular.
+	resolved, err := c.resolveSpec(ctx, spec, baseDir, nil, limits.Limits)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		if closeErr := resolved.close(); closeErr != nil && retErr == nil {
+			retErr = closeErr
+		}
+	}()
+
+	treeDigest, err := canonical.TreeDigest(resolved.composed.Records)
+	if err != nil {
+		return nil, err
+	}
+	lock, err := resolved.buildLock(treeDigest)
+	if err != nil {
+		return nil, err
+	}
+	lockDigest, lockBytes, err := canonical.JSONDigest(lock)
+	if err != nil {
+		return nil, err
+	}
+
+	result := &LockResult{
+		Lock:           lock,
+		LockBytes:      lockBytes,
+		LockDigest:     lockDigest.String(),
+		ManifestDigest: resolved.manifestDigest.String(),
+		TreeDigest:     treeDigest.String(),
+		SourceCount:    len(lock.Sources),
+		FileCount:      len(lock.Files),
+		OutputPath:     outputPath,
+	}
+
+	if req.Check {
+		existing := req.ExistingLock
+		if existing == nil {
+			loaded, loadErr := loadLockFile(outputPath)
+			if loadErr != nil {
+				return nil, loadErr
+			}
+			existing = loaded
+		}
+		_, existingBytes, encodeErr := canonical.JSONDigest(existing)
+		if encodeErr != nil {
+			return nil, encodeErr
+		}
+		result.Matched = string(existingBytes) == string(lockBytes)
+		if !result.Matched {
+			return result, fault.New(fault.CodeStaleLock, "lock",
+				"the existing lock does not match the current resolution")
+		}
+		return result, nil
+	}
+
+	if err := writeFileAtomic(outputPath, lockBytes); err != nil {
+		return nil, err
+	}
+	c.logger.InfoContext(ctx, "wrote lock",
+		"path", outputPath, "digest", lockDigest.String(), "sources", len(lock.Sources))
+	return result, nil
+}
+
+// DefaultLockName is the lock file written beside a manifest.
+const DefaultLockName = "devproof.lock.json"
+
+// loadSpec resolves the manifest a request names, or synthesizes one for a
+// direct source.
+func (c *Client) loadSpec(req BuildRequest) (*bundle.Spec, string, error) {
+	supplied := 0
+	for _, present := range []bool{req.SpecPath != "", req.Spec != nil, req.SourcePath != ""} {
+		if present {
+			supplied++
+		}
+	}
+	switch supplied {
+	case 0:
+		return nil, "", fault.New(fault.CodeInvalidInput, "build",
+			"supply a manifest path, a manifest, or a direct source path")
+	case 1:
+	default:
+		return nil, "", fault.New(fault.CodeInvalidInput, "build",
+			"a manifest and a direct source path are mutually exclusive")
+	}
+
+	switch {
+	case req.SourcePath != "":
+		return sourcepath.DirectSpec(
+			directSourceName, req.SourcePath, req.MountPath, req.Include, req.Exclude)
+
+	case req.Spec != nil:
+		if err := req.Spec.Validate(); err != nil {
+			return nil, "", err
+		}
+		return req.Spec, req.SpecDir, nil
+
+	default:
+		data, err := os.ReadFile(req.SpecPath) //nolint:gosec // caller-supplied manifest path
+		if err != nil {
+			return nil, "", fault.Wrap(fault.CodeInvalidInput, "build", "reading manifest", err)
+		}
+		spec, err := bundle.ParseSpec(data)
+		if err != nil {
+			return nil, "", err
+		}
+		abs, err := filepath.Abs(req.SpecPath)
+		if err != nil {
+			return nil, "", fault.Wrap(fault.CodeInvalidInput, "build", "resolving manifest path", err)
+		}
+		return spec, filepath.Dir(abs), nil
+	}
+}
+
+// directSourceName is the logical name a direct build's single source gets.
+// It does not affect identity; it appears in diagnostics and in the lock.
+const directSourceName = "source"
+
+// loadLock resolves which lock a build should enforce.
+//
+// A lock sitting beside a manifest is enforced by default. That is the whole
+// point of committing one: a build that ignored it unless asked would make
+// reproducibility opt-in (DP-004).
+func (c *Client) loadLock(req BuildRequest, baseDir string) (_ *bundle.Lock, found bool, _ error) {
+	switch {
+	case req.SkipLock && req.UpdateLock:
+		return nil, false, fault.New(fault.CodeInvalidInput, "build",
+			"skipping the lock and updating it are mutually exclusive")
+	case req.SkipLock, req.UpdateLock:
+		return nil, false, nil
+	case req.Lock != nil:
+		return req.Lock, true, req.Lock.Validate()
+	case req.LockPath != "":
+		lock, err := loadLockFile(req.LockPath)
+		return lock, err == nil, err
+	case req.SourcePath != "":
+		// A direct build has no manifest directory to look beside.
+		return nil, false, nil
+	}
+
+	beside := filepath.Join(baseDir, DefaultLockName)
+	if _, statErr := os.Lstat(beside); statErr != nil {
+		// An absent lock is the ordinary case for a manifest that has not
+		// been locked yet, not a failure.
+		return nil, false, nil
+	}
+	lock, err := loadLockFile(beside)
+	return lock, err == nil, err
+}
+
+func loadLockFile(path string) (*bundle.Lock, error) {
+	data, err := os.ReadFile(path) //nolint:gosec // caller-supplied lock path
+	if err != nil {
+		return nil, fault.Wrap(fault.CodeInvalidInput, "build", "reading lock", err)
+	}
+	return bundle.ParseLock(data)
+}
+
+// writeFileAtomic writes content via a temporary file and a rename, so a
+// reader never sees a half-written lock.
+func writeFileAtomic(path string, content []byte) (retErr error) {
+	dir := filepath.Dir(path)
+	temp, err := os.CreateTemp(dir, ".devproof-lock-*")
+	if err != nil {
+		return fault.Wrap(fault.CodeInternal, "lock", "creating a temporary lock file", err)
+	}
+	defer func() {
+		if retErr != nil {
+			_ = os.Remove(temp.Name())
+		}
+	}()
+
+	if _, err := temp.Write(content); err != nil {
+		_ = temp.Close()
+		return fault.Wrap(fault.CodeInternal, "lock", "writing lock", err)
+	}
+	if err := temp.Sync(); err != nil {
+		_ = temp.Close()
+		return fault.Wrap(fault.CodeInternal, "lock", "syncing lock", err)
+	}
+	if err := temp.Close(); err != nil {
+		return fault.Wrap(fault.CodeInternal, "lock", "closing lock", err)
+	}
+	// Created private by CreateTemp, then relaxed: a lock is committed to a
+	// repository and read by everyone, but it must not be world-readable
+	// while it is still partially written.
+	if err := os.Chmod(temp.Name(), 0o644); err != nil {
+		return fault.Wrap(fault.CodeInternal, "lock", "setting lock permissions", err)
+	}
+	if err := os.Rename(temp.Name(), path); err != nil {
+		return fault.Wrap(fault.CodeInternal, "lock", "publishing lock", err)
+	}
+	return nil
 }
 
 // VerifyRequest describes a subject to verify.

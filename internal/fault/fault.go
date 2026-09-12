@@ -263,3 +263,11 @@ func CodeOf(err error) Code {
 	}
 	return CodeInternal
 }
+
+// AsError extracts the typed Error from an error chain.
+//
+// It exists so that callers can add context — a source name, a path — to an
+// error raised deeper down, without reconstructing it and losing the cause.
+func AsError(err error) (*Error, bool) {
+	return stderrors.AsType[*Error](err)
+}

@@ -76,9 +76,15 @@ test: ## Run unit tests with the race detector
 # uncovered would only train everyone to ignore the number.
 COVER_PKGS = $(shell go list ./... | grep -v '/internal/canonical/deflate')
 
+# -coverpkg is what makes this number honest. Without it Go credits a
+# statement only to tests in its own package, so code exercised through the
+# SDK's end-to-end tests — which is most of the interesting code — reads as
+# uncovered and the number stops meaning anything.
 .PHONY: cover
 cover: ## Run tests and write a coverage profile
-	go test -race -count=1 -covermode=atomic -coverprofile=$(COVERAGE_FILE) $(COVER_PKGS)
+	go test -race -count=1 -covermode=atomic \
+	  -coverpkg=$(shell echo $(COVER_PKGS) | tr ' ' ',') \
+	  -coverprofile=$(COVERAGE_FILE) $(COVER_PKGS)
 	go tool cover -func=$(COVERAGE_FILE) | tail -1
 
 .PHONY: cover-html

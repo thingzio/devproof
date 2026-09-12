@@ -193,28 +193,43 @@ func TestBuildIsIndependentOfCreationOrder(t *testing.T) {
 	}
 }
 
-// A mount path relocates content without changing anything about how it is
-// encoded, so the same tree at two mounts must differ only by path.
-func TestSnapshotMountPathRelocatesContent(t *testing.T) {
+// Filtering happens against the canonical path, before any mounting, so a
+// pattern in a manifest means the same thing regardless of where the source
+// ends up in the bundle.
+func TestSnapshotAppliesPatterns(t *testing.T) {
 	t.Parallel()
 
 	source := t.TempDir()
-	writeTree(t, source, sourceTree{"config.yaml": "a: 1\n"})
+	writeTree(t, source, sourceTree{
+		"config/service.yaml": "a: 1\n",
+		"config/scratch.tmp":  "junk",
+		"scripts/run.sh":      "#!/bin/sh\n",
+		"README.md":           "docs",
+	})
+
+	patterns, err := bundle.NewPatternSet(
+		[]string{"config/**", "scripts/**"},
+		[]string{"**/*.tmp"},
+	)
+	if err != nil {
+		t.Fatalf("NewPatternSet: %v", err)
+	}
 
 	snapshot, err := SnapshotDir(t.Context(), source, SnapshotOptions{
-		MountPath: "environment/production",
-		TempRoot:  t.TempDir(),
+		Patterns: patterns,
+		TempRoot: t.TempDir(),
 	})
 	if err != nil {
 		t.Fatalf("SnapshotDir: %v", err)
 	}
 	defer func() { _ = snapshot.Close() }()
 
-	records := snapshot.Records()
-	if len(records) != 1 {
-		t.Fatalf("snapshotted %d files, want 1", len(records))
+	var got []string
+	for _, record := range snapshot.Records() {
+		got = append(got, string(record.Path))
 	}
-	if want := canonical.Path("environment/production/config.yaml"); records[0].Path != want {
-		t.Errorf("path = %q, want %q", records[0].Path, want)
+	want := []string{"config/service.yaml", "scripts/run.sh"}
+	if !slices.Equal(got, want) {
+		t.Errorf("selected %v, want %v", got, want)
 	}
 }

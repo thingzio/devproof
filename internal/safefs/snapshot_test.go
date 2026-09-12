@@ -164,20 +164,6 @@ func TestSnapshotLimits(t *testing.T) {
 	}
 }
 
-func TestSnapshotRejectsEscapingMountPath(t *testing.T) {
-	t.Parallel()
-
-	dir := t.TempDir()
-	writeTree(t, dir, sourceTree{"a.txt": "x"})
-
-	for _, mount := range []string{"/absolute", "../escape", "..", "a/../../b"} {
-		_, err := snapshot(t, dir, SnapshotOptions{MountPath: mount})
-		if !stderrors.Is(err, fault.CodeInvalidInput) {
-			t.Errorf("mount %q: code = %q, want %q", mount, fault.CodeOf(err), fault.CodeInvalidInput)
-		}
-	}
-}
-
 // Records must be sorted by canonical path regardless of how the filesystem
 // enumerated them.
 func TestSnapshotRecordsAreSorted(t *testing.T) {

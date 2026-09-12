@@ -8,7 +8,6 @@ import (
 	"io"
 	"io/fs"
 	"os"
-	"path"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -24,9 +23,8 @@ const copyBufferSize = 128 * 1024
 
 // SnapshotOptions configures a source snapshot.
 type SnapshotOptions struct {
-	// MountPath places the source below a prefix in the bundle. Empty or "."
-	// mounts at the root.
-	MountPath string
+	// Patterns filters source-relative paths. Nil selects everything.
+	Patterns *bundle.PatternSet
 	// Limits bounds what may be snapshotted.
 	Limits bundle.Limits
 	// TempRoot is the parent for the private workspace. Empty uses the
@@ -41,6 +39,10 @@ type SnapshotOptions struct {
 // and hashed again as it is read out, so a source edited mid-build fails the
 // operation instead of producing a bundle whose layer disagrees with the
 // inventory that describes it.
+//
+// Paths are source-relative. A snapshot does not know where it will be
+// mounted, which is what lets one source have a single tree digest no matter
+// where composition places it.
 type Snapshot struct {
 	ws      *Workspace
 	records []canonical.FileRecord
@@ -89,9 +91,13 @@ func storagePath(p canonical.Path) string { return filepath.FromSlash(string(p))
 func SnapshotDir(ctx context.Context, dir string, opts SnapshotOptions) (_ *Snapshot, retErr error) {
 	limits := opts.Limits.WithDefaults()
 
-	mount, err := normalizeMountPath(opts.MountPath)
-	if err != nil {
-		return nil, err
+	patterns := opts.Patterns
+	if patterns == nil {
+		selectAll, err := bundle.NewPatternSet(nil, nil)
+		if err != nil {
+			return nil, err
+		}
+		patterns = selectAll
 	}
 
 	sourceRoot, err := openSourceRoot(dir)
@@ -115,11 +121,11 @@ func SnapshotDir(ctx context.Context, dir string, opts SnapshotOptions) (_ *Snap
 	}()
 
 	walker := &snapshotWalker{
-		ctx:    ctx,
-		source: sourceRoot,
-		ws:     ws,
-		mount:  mount,
-		limits: limits,
+		ctx:      ctx,
+		source:   sourceRoot,
+		ws:       ws,
+		patterns: patterns,
+		limits:   limits,
 		pathLimits: canonical.PathLimits{
 			MaxBytes:        int(limits.MaxPathBytes),
 			MaxSegmentBytes: int(limits.MaxPathSegmentBytes),
@@ -140,8 +146,9 @@ func SnapshotDir(ctx context.Context, dir string, opts SnapshotOptions) (_ *Snap
 		return strings.Compare(string(a.Path), string(b.Path))
 	})
 
-	// Re-running collision detection over the assembled set catches pairs
-	// that only conflict once the mount path is applied.
+	// Collision detection over the assembled set. Two source files whose
+	// names differ only by case or Unicode form reach here as distinct
+	// entries and must be refused before either is used.
 	var paths canonical.PathSet
 	for _, rec := range walker.records {
 		if err := paths.Add(rec.Path); err != nil {
@@ -183,26 +190,11 @@ func openSourceRoot(dir string) (*os.Root, error) {
 	return root, nil
 }
 
-func normalizeMountPath(mount string) (string, error) {
-	if mount == "" || mount == "." {
-		return "", nil
-	}
-	cleaned := path.Clean(mount)
-	if cleaned == "." {
-		return "", nil
-	}
-	if strings.HasPrefix(cleaned, "/") || strings.HasPrefix(cleaned, "..") {
-		return "", fault.New(fault.CodeInvalidInput, snapshotOp,
-			"mount path must be relative and must not escape the bundle root").WithPath(mount)
-	}
-	return cleaned, nil
-}
-
 type snapshotWalker struct {
 	ctx        context.Context
 	source     *os.Root
 	ws         *Workspace
-	mount      string
+	patterns   *bundle.PatternSet
 	limits     bundle.Limits
 	pathLimits canonical.PathLimits
 	buf        []byte
@@ -273,6 +265,17 @@ func (w *snapshotWalker) readDir(dir string) ([]fs.DirEntry, error) {
 }
 
 func (w *snapshotWalker) snapshotFile(sourcePath string, info fs.FileInfo) (retErr error) {
+	// The canonical form is derived before filtering so that patterns are
+	// matched against the path the bundle would carry, not the one the
+	// filesystem happened to spell.
+	bundlePath, err := canonical.NormalizePath(sourcePath, w.pathLimits)
+	if err != nil {
+		return err
+	}
+	if !w.patterns.Selects(string(bundlePath)) {
+		return nil
+	}
+
 	if int64(len(w.records)) >= w.limits.MaxFiles {
 		return fault.New(fault.CodeLimitExceeded, snapshotOp,
 			fmt.Sprintf("source contains more than %d files", w.limits.MaxFiles))
@@ -281,11 +284,6 @@ func (w *snapshotWalker) snapshotFile(sourcePath string, info fs.FileInfo) (retE
 		return fault.New(fault.CodeLimitExceeded, snapshotOp,
 			fmt.Sprintf("file is %d bytes, limit is %d", info.Size(), w.limits.MaxFileBytes)).
 			WithPath(sourcePath)
-	}
-
-	bundlePath, err := w.bundlePath(sourcePath)
-	if err != nil {
-		return err
 	}
 
 	// Hash and size come from the bytes actually copied, never from the
@@ -314,15 +312,6 @@ func (w *snapshotWalker) snapshotFile(sourcePath string, info fs.FileInfo) (retE
 		Digest: digest,
 	})
 	return nil
-}
-
-// bundlePath maps a source-relative path to its canonical bundle path.
-func (w *snapshotWalker) bundlePath(sourcePath string) (canonical.Path, error) {
-	joined := sourcePath
-	if w.mount != "" {
-		joined = w.mount + "/" + sourcePath
-	}
-	return canonical.NormalizePath(joined, w.pathLimits)
 }
 
 func (w *snapshotWalker) copyIntoWorkspace(sourcePath string, bundlePath canonical.Path) (
