@@ -6,10 +6,16 @@ on:
   pull_request:
     branches: [main]
 
-# A pull request that is force-pushed should not leave its previous run
-# burning runners; the newest commit is the only one whose result matters.
+# Neither a force-pushed pull request nor a run of pushes to main should leave
+# older runs burning runners; the newest commit is the only one whose result
+# matters.
+#
+# Keyed on the ref rather than the run id. github.head_ref is empty for a push,
+# so falling back to github.run_id gave every push its own group and they
+# queued behind one another instead of superseding -- which on a busy repo
+# means waiting out a backlog to learn about the newest commit.
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  group: ci-${{ github.workflow }}-${{ github.head_ref || github.ref }}
   cancel-in-progress: true
 
 permissions:
