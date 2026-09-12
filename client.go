@@ -2,10 +2,13 @@ package devproof
 
 import (
 	"context"
+	stderrors "errors"
 	"log/slog"
 
+	"github.com/thingzio/devproof/artifact"
 	"github.com/thingzio/devproof/bundle"
 	"github.com/thingzio/devproof/internal/fault"
+	"github.com/thingzio/devproof/internal/oci"
 	"github.com/thingzio/devproof/source"
 	sourcegit "github.com/thingzio/devproof/source/git"
 	sourcepath "github.com/thingzio/devproof/source/path"
@@ -21,11 +24,12 @@ const clientOp = "devproof.client"
 // call os.Exit, print, prompt, or open a browser — those are a command-line
 // program's business, and a library that does them cannot be embedded.
 type Client struct {
-	limits    bundle.Limits
-	tempRoot  string
-	logger    *slog.Logger
-	resolvers map[string]source.Resolver
-	closed    bool
+	limits     bundle.Limits
+	tempRoot   string
+	logger     *slog.Logger
+	resolvers  map[string]source.Resolver
+	transports map[string]artifact.Transport
+	closed     bool
 }
 
 // Option configures a Client.
@@ -38,9 +42,10 @@ type Option func(*Client) error
 // output to stderr.
 func New(opts ...Option) (*Client, error) {
 	c := &Client{
-		limits:    bundle.DefaultLimits(),
-		logger:    slog.New(discardHandler{}),
-		resolvers: make(map[string]source.Resolver),
+		limits:     bundle.DefaultLimits(),
+		logger:     slog.New(discardHandler{}),
+		resolvers:  make(map[string]source.Resolver),
+		transports: defaultTransports(),
 	}
 	// The built-in resolvers are registered first so an application can
 	// replace one deliberately, rather than being unable to.
@@ -106,6 +111,52 @@ func WithAbsolutePathSources() Option {
 	}
 }
 
+// WithTransport registers an artifact transport, replacing any transport
+// already registered for the same scheme.
+func WithTransport(transport artifact.Transport) Option {
+	return func(c *Client) error {
+		if transport == nil {
+			return fault.New(fault.CodeInvalidInput, clientOp, "transport must not be nil")
+		}
+		if transport.Scheme() == "" {
+			return fault.New(fault.CodeInvalidInput, clientOp, "transport has no scheme")
+		}
+		c.transports[transport.Scheme()] = transport
+		return nil
+	}
+}
+
+// WithRegistryCredentials supplies per-host registry credentials.
+//
+// Lookup is by host, so a credential issued for one registry is never offered
+// to another (DP-013).
+func WithRegistryCredentials(provider artifact.CredentialProvider) Option {
+	return func(c *Client) error {
+		if provider == nil {
+			return fault.New(fault.CodeInvalidInput, clientOp, "credential provider must not be nil")
+		}
+		c.transports[artifact.SchemeRegistry] = oci.NewRegistry(oci.RegistryOptions{
+			Credentials: provider,
+		})
+		return nil
+	}
+}
+
+// WithInsecureRegistry disables TLS for registry transport.
+//
+// It exists for a local test registry. Using it against anything else sends
+// credentials and content in the clear, which is why it is a named option
+// rather than a field on a config struct somebody might set by accident.
+func WithInsecureRegistry(provider artifact.CredentialProvider) Option {
+	return func(c *Client) error {
+		c.transports[artifact.SchemeRegistry] = oci.NewRegistry(oci.RegistryOptions{
+			Credentials: provider,
+			PlainHTTP:   true,
+		})
+		return nil
+	}
+}
+
 // WithTempRoot sets the parent directory for snapshot and layout scratch
 // space.
 //
@@ -141,7 +192,15 @@ func WithLogger(logger *slog.Logger) Option {
 // impossible to reason about.
 func (c *Client) Close() error {
 	c.closed = true
-	return nil
+
+	var errs []error
+	for scheme, transport := range c.transports {
+		if err := transport.Close(); err != nil {
+			errs = append(errs, fault.Wrap(fault.CodeInternal, clientOp,
+				"closing the "+scheme+" transport", err))
+		}
+	}
+	return stderrors.Join(errs...)
 }
 
 func (c *Client) checkOpen() error {

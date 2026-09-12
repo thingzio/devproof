@@ -62,9 +62,9 @@ func TestBuildVerifyExpandRoundTrip(t *testing.T) {
 	layoutPath := filepath.Join(t.TempDir(), "layout")
 
 	built, err := client.Build(t.Context(), devproof.BuildRequest{
-		SourcePath: source,
-		LayoutPath: layoutPath,
-		Tag:        "v1",
+		SourcePath:  source,
+		Destination: "oci-layout://" + layoutPath,
+		Tag:         "v1",
 	})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
@@ -74,8 +74,7 @@ func TestBuildVerifyExpandRoundTrip(t *testing.T) {
 	}
 
 	report, err := client.Verify(t.Context(), devproof.VerifyRequest{
-		LayoutPath: layoutPath,
-		Reference:  built.SubjectDigest,
+		Reference: "oci-layout://" + layoutPath + "@" + built.SubjectDigest,
 	})
 	if err != nil {
 		t.Fatalf("Verify: %v", err)
@@ -98,8 +97,7 @@ func TestBuildVerifyExpandRoundTrip(t *testing.T) {
 
 	destination := filepath.Join(t.TempDir(), "expanded")
 	expanded, err := client.Expand(t.Context(), devproof.ExpandRequest{
-		LayoutPath:  layoutPath,
-		Reference:   built.SubjectDigest,
+		Reference:   "oci-layout://" + layoutPath + "@" + built.SubjectDigest,
 		Destination: destination,
 	})
 	if err != nil {
@@ -110,8 +108,8 @@ func TestBuildVerifyExpandRoundTrip(t *testing.T) {
 	}
 
 	rebuilt, err := client.Build(t.Context(), devproof.BuildRequest{
-		SourcePath: destination,
-		LayoutPath: filepath.Join(t.TempDir(), "layout2"),
+		SourcePath:  destination,
+		Destination: "oci-layout://" + filepath.Join(t.TempDir(), "layout2"),
 	})
 	if err != nil {
 		t.Fatalf("rebuild: %v", err)
@@ -141,9 +139,9 @@ func TestBuildProducesAConformantLayout(t *testing.T) {
 	layoutPath := filepath.Join(t.TempDir(), "layout")
 
 	built, err := client.Build(t.Context(), devproof.BuildRequest{
-		SourcePath: defaultSource(t),
-		LayoutPath: layoutPath,
-		Tag:        "v1",
+		SourcePath:  defaultSource(t),
+		Destination: "oci-layout://" + layoutPath,
+		Tag:         "v1",
 	})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
@@ -212,17 +210,16 @@ func TestVerifyResolvesTagToDigest(t *testing.T) {
 	layoutPath := filepath.Join(t.TempDir(), "layout")
 
 	built, err := client.Build(t.Context(), devproof.BuildRequest{
-		SourcePath: defaultSource(t),
-		LayoutPath: layoutPath,
-		Tag:        "release",
+		SourcePath:  defaultSource(t),
+		Destination: "oci-layout://" + layoutPath,
+		Tag:         "release",
 	})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
 
 	report, err := client.Verify(t.Context(), devproof.VerifyRequest{
-		LayoutPath: layoutPath,
-		Reference:  "release",
+		Reference: "oci-layout://" + layoutPath + ":release",
 	})
 	if err != nil {
 		t.Fatalf("Verify by tag: %v", err)
@@ -241,16 +238,15 @@ func TestVerifyRequireDigestRejectsTag(t *testing.T) {
 	layoutPath := filepath.Join(t.TempDir(), "layout")
 
 	if _, err := client.Build(t.Context(), devproof.BuildRequest{
-		SourcePath: defaultSource(t),
-		LayoutPath: layoutPath,
-		Tag:        "release",
+		SourcePath:  defaultSource(t),
+		Destination: "oci-layout://" + layoutPath,
+		Tag:         "release",
 	}); err != nil {
 		t.Fatalf("Build: %v", err)
 	}
 
 	_, err := client.Verify(t.Context(), devproof.VerifyRequest{
-		LayoutPath:    layoutPath,
-		Reference:     "release",
+		Reference:     "oci-layout://" + layoutPath + "@" + "release",
 		RequireDigest: true,
 	})
 	if !stderrors.Is(err, devproof.CodeInvalidInput) {
@@ -267,8 +263,8 @@ func TestVerifyDetectsTamperedBlob(t *testing.T) {
 	layoutPath := filepath.Join(t.TempDir(), "layout")
 
 	built, err := client.Build(t.Context(), devproof.BuildRequest{
-		SourcePath: defaultSource(t),
-		LayoutPath: layoutPath,
+		SourcePath:  defaultSource(t),
+		Destination: "oci-layout://" + layoutPath,
 	})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
@@ -286,8 +282,7 @@ func TestVerifyDetectsTamperedBlob(t *testing.T) {
 	}
 
 	_, err = client.Verify(t.Context(), devproof.VerifyRequest{
-		LayoutPath: layoutPath,
-		Reference:  built.SubjectDigest,
+		Reference: "oci-layout://" + layoutPath + "@" + built.SubjectDigest,
 	})
 	if !stderrors.Is(err, devproof.CodeDigestMismatch) {
 		t.Errorf("code = %q, want %q", codeOf(err), devproof.CodeDigestMismatch)
@@ -301,8 +296,8 @@ func TestExpandRefusesExistingDestination(t *testing.T) {
 	layoutPath := filepath.Join(t.TempDir(), "layout")
 
 	built, err := client.Build(t.Context(), devproof.BuildRequest{
-		SourcePath: defaultSource(t),
-		LayoutPath: layoutPath,
+		SourcePath:  defaultSource(t),
+		Destination: "oci-layout://" + layoutPath,
 	})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
@@ -314,8 +309,7 @@ func TestExpandRefusesExistingDestination(t *testing.T) {
 	}
 
 	_, err = client.Expand(t.Context(), devproof.ExpandRequest{
-		LayoutPath:  layoutPath,
-		Reference:   built.SubjectDigest,
+		Reference:   "oci-layout://" + layoutPath + "@" + built.SubjectDigest,
 		Destination: destination,
 	})
 	if !stderrors.Is(err, devproof.CodeDestinationExists) {
@@ -329,8 +323,8 @@ func TestBuildRejectsEmptySource(t *testing.T) {
 	client := newClient(t)
 
 	_, err := client.Build(t.Context(), devproof.BuildRequest{
-		SourcePath: t.TempDir(),
-		LayoutPath: filepath.Join(t.TempDir(), "layout"),
+		SourcePath:  t.TempDir(),
+		Destination: "oci-layout://" + filepath.Join(t.TempDir(), "layout"),
 	})
 	if !stderrors.Is(err, devproof.CodeInvalidInput) {
 		t.Errorf("code = %q, want %q", codeOf(err), devproof.CodeInvalidInput)
@@ -346,16 +340,16 @@ func TestBuildMountPathChangesSubjectDigest(t *testing.T) {
 	source := defaultSource(t)
 
 	atRoot, err := client.Build(t.Context(), devproof.BuildRequest{
-		SourcePath: source,
-		LayoutPath: filepath.Join(t.TempDir(), "a"),
+		SourcePath:  source,
+		Destination: "oci-layout://" + filepath.Join(t.TempDir(), "a"),
 	})
 	if err != nil {
 		t.Fatalf("Build at root: %v", err)
 	}
 	mounted, err := client.Build(t.Context(), devproof.BuildRequest{
-		SourcePath: source,
-		MountPath:  "environment",
-		LayoutPath: filepath.Join(t.TempDir(), "b"),
+		SourcePath:  source,
+		MountPath:   "environment",
+		Destination: "oci-layout://" + filepath.Join(t.TempDir(), "b"),
 	})
 	if err != nil {
 		t.Fatalf("Build mounted: %v", err)
@@ -377,9 +371,9 @@ func TestLimitsIntersectAcrossClientAndRequest(t *testing.T) {
 	client := newClient(t, devproof.WithLimits(devproof.Limits{MaxFiles: 2}))
 
 	_, err := client.Build(t.Context(), devproof.BuildRequest{
-		SourcePath: defaultSource(t), // three files
-		LayoutPath: filepath.Join(t.TempDir(), "layout"),
-		Limits:     devproof.Limits{MaxFiles: 1000},
+		SourcePath:  defaultSource(t), // three files
+		Destination: "oci-layout://" + filepath.Join(t.TempDir(), "layout"),
+		Limits:      devproof.Limits{MaxFiles: 1000},
 	})
 	if !stderrors.Is(err, devproof.CodeLimitExceeded) {
 		t.Errorf("a request limit relaxed the client's: code = %q", codeOf(err))

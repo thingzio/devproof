@@ -80,8 +80,8 @@ func TestBuildFromManifest(t *testing.T) {
 	manifest := writeManifest(t, twoSourceManifest, twoSourceTrees())
 
 	built, err := client.Build(t.Context(), devproof.BuildRequest{
-		SpecPath:   manifest,
-		LayoutPath: filepath.Join(t.TempDir(), "layout"),
+		SpecPath:    manifest,
+		Destination: "oci-layout://" + filepath.Join(t.TempDir(), "layout"),
 	})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
@@ -119,7 +119,7 @@ func TestMountPathDoesNotChangeSourceTreeDigest(t *testing.T) {
 
 	atApp := writeManifest(t, twoSourceManifest, trees)
 	built, err := client.Build(t.Context(), devproof.BuildRequest{
-		SpecPath: atApp, LayoutPath: filepath.Join(t.TempDir(), "a"),
+		SpecPath: atApp, Destination: "oci-layout://" + filepath.Join(t.TempDir(), "a"),
 	})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
@@ -128,7 +128,7 @@ func TestMountPathDoesNotChangeSourceTreeDigest(t *testing.T) {
 	moved := writeManifest(t, strings.Replace(twoSourceManifest,
 		"mountPath: app", "mountPath: elsewhere", 1), trees)
 	rebuilt, err := client.Build(t.Context(), devproof.BuildRequest{
-		SpecPath: moved, LayoutPath: filepath.Join(t.TempDir(), "b"),
+		SpecPath: moved, Destination: "oci-layout://" + filepath.Join(t.TempDir(), "b"),
 	})
 	if err != nil {
 		t.Fatalf("Build moved: %v", err)
@@ -155,7 +155,7 @@ func TestSourceOrderDoesNotAffectOutput(t *testing.T) {
 
 	forward := writeManifest(t, twoSourceManifest, trees)
 	first, err := client.Build(t.Context(), devproof.BuildRequest{
-		SpecPath: forward, LayoutPath: filepath.Join(t.TempDir(), "a"),
+		SpecPath: forward, Destination: "oci-layout://" + filepath.Join(t.TempDir(), "a"),
 	})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
@@ -186,7 +186,7 @@ spec:
         path: ./application
 `
 	second, err := client.Build(t.Context(), devproof.BuildRequest{
-		SpecPath: writeManifest(t, reversed, trees), LayoutPath: filepath.Join(t.TempDir(), "b"),
+		SpecPath: writeManifest(t, reversed, trees), Destination: "oci-layout://" + filepath.Join(t.TempDir(), "b"),
 	})
 	if err != nil {
 		t.Fatalf("Build reversed: %v", err)
@@ -232,8 +232,8 @@ spec:
 	}
 
 	_, err := client.Build(t.Context(), devproof.BuildRequest{
-		SpecPath:   writeManifest(t, manifest, trees),
-		LayoutPath: filepath.Join(t.TempDir(), "layout"),
+		SpecPath:    writeManifest(t, manifest, trees),
+		Destination: "oci-layout://" + filepath.Join(t.TempDir(), "layout"),
 	})
 	if !stderrors.Is(err, devproof.CodePathCollision) {
 		t.Errorf("code = %q, want %q", codeOf(err), devproof.CodePathCollision)
@@ -297,7 +297,7 @@ func TestBuildEnforcesLockByDefault(t *testing.T) {
 
 	// A locked build of unchanged material succeeds.
 	if _, err := client.Build(t.Context(), devproof.BuildRequest{
-		SpecPath: manifest, LayoutPath: filepath.Join(t.TempDir(), "a"),
+		SpecPath: manifest, Destination: "oci-layout://" + filepath.Join(t.TempDir(), "a"),
 	}); err != nil {
 		t.Fatalf("locked build of unchanged material: %v", err)
 	}
@@ -309,7 +309,7 @@ func TestBuildEnforcesLockByDefault(t *testing.T) {
 	}
 
 	_, err := client.Build(t.Context(), devproof.BuildRequest{
-		SpecPath: manifest, LayoutPath: filepath.Join(t.TempDir(), "b"),
+		SpecPath: manifest, Destination: "oci-layout://" + filepath.Join(t.TempDir(), "b"),
 	})
 	if !stderrors.Is(err, devproof.CodeStaleLock) {
 		t.Errorf("code = %q, want %q", codeOf(err), devproof.CodeStaleLock)
@@ -337,7 +337,7 @@ func TestBuildDoesNotRelockImplicitly(t *testing.T) {
 
 	// UpdateLock resolves afresh instead of enforcing.
 	updated, err := client.Build(t.Context(), devproof.BuildRequest{
-		SpecPath: manifest, LayoutPath: filepath.Join(t.TempDir(), "a"), UpdateLock: true,
+		SpecPath: manifest, Destination: "oci-layout://" + filepath.Join(t.TempDir(), "a"), UpdateLock: true,
 	})
 	if err != nil {
 		t.Fatalf("build with UpdateLock: %v", err)
@@ -481,9 +481,9 @@ func TestBuildRejectsManifestAndDirectSourceTogether(t *testing.T) {
 	client := newClient(t)
 
 	_, err := client.Build(t.Context(), devproof.BuildRequest{
-		SpecPath:   writeManifest(t, twoSourceManifest, twoSourceTrees()),
-		SourcePath: t.TempDir(),
-		LayoutPath: filepath.Join(t.TempDir(), "layout"),
+		SpecPath:    writeManifest(t, twoSourceManifest, twoSourceTrees()),
+		SourcePath:  t.TempDir(),
+		Destination: "oci-layout://" + filepath.Join(t.TempDir(), "layout"),
 	})
 	if !stderrors.Is(err, devproof.CodeInvalidInput) {
 		t.Errorf("code = %q, want %q", codeOf(err), devproof.CodeInvalidInput)
@@ -506,8 +506,8 @@ spec:
       config: {bucket: example}
 `
 	_, err := client.Build(t.Context(), devproof.BuildRequest{
-		SpecPath:   writeManifest(t, manifest, nil),
-		LayoutPath: filepath.Join(t.TempDir(), "layout"),
+		SpecPath:    writeManifest(t, manifest, nil),
+		Destination: "oci-layout://" + filepath.Join(t.TempDir(), "layout"),
 	})
 	if !stderrors.Is(err, devproof.CodeUnsupportedSource) {
 		t.Errorf("code = %q, want %q", codeOf(err), devproof.CodeUnsupportedSource)
@@ -538,7 +538,7 @@ spec:
 	specPath := writeManifest(t, manifest, nil)
 
 	_, err := newClient(t).Build(t.Context(), devproof.BuildRequest{
-		SpecPath: specPath, LayoutPath: filepath.Join(t.TempDir(), "a"),
+		SpecPath: specPath, Destination: "oci-layout://" + filepath.Join(t.TempDir(), "a"),
 	})
 	if !stderrors.Is(err, devproof.CodeInvalidInput) {
 		t.Errorf("default client: code = %q, want %q", codeOf(err), devproof.CodeInvalidInput)
@@ -546,7 +546,7 @@ spec:
 
 	permissive := newClient(t, devproof.WithAbsolutePathSources())
 	if _, err := permissive.Build(t.Context(), devproof.BuildRequest{
-		SpecPath: specPath, LayoutPath: filepath.Join(t.TempDir(), "b"),
+		SpecPath: specPath, Destination: "oci-layout://" + filepath.Join(t.TempDir(), "b"),
 	}); err != nil {
 		t.Errorf("opted-in client: %v", err)
 	}
@@ -584,9 +584,9 @@ spec:
 
 	for i := range 12 {
 		built, err := client.Build(t.Context(), devproof.BuildRequest{
-			SpecPath:   specPath,
-			LayoutPath: filepath.Join(t.TempDir(), "layout"),
-			SkipLock:   true,
+			SpecPath:    specPath,
+			Destination: "oci-layout://" + filepath.Join(t.TempDir(), "layout"),
+			SkipLock:    true,
 		})
 		if err != nil {
 			t.Fatalf("build %d: %v", i, err)
@@ -610,7 +610,7 @@ func TestParallelSourceLimitIsHonored(t *testing.T) {
 	manifest := writeManifest(t, twoSourceManifest, twoSourceTrees())
 
 	if _, err := client.Build(t.Context(), devproof.BuildRequest{
-		SpecPath: manifest, LayoutPath: filepath.Join(t.TempDir(), "layout"), SkipLock: true,
+		SpecPath: manifest, Destination: "oci-layout://" + filepath.Join(t.TempDir(), "layout"), SkipLock: true,
 	}); err != nil {
 		t.Fatalf("serialized build: %v", err)
 	}

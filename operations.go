@@ -2,14 +2,14 @@ package devproof
 
 import (
 	"context"
-	stderrors "errors"
+	"fmt"
 	"os"
 	"path/filepath"
 
+	"github.com/thingzio/devproof/artifact"
 	"github.com/thingzio/devproof/bundle"
 	"github.com/thingzio/devproof/internal/canonical"
 	"github.com/thingzio/devproof/internal/fault"
-	"github.com/thingzio/devproof/internal/oci"
 	"github.com/thingzio/devproof/internal/safefs"
 	"github.com/thingzio/devproof/policy"
 	sourcepath "github.com/thingzio/devproof/source/path"
@@ -48,9 +48,12 @@ type BuildRequest struct {
 	// SkipLock builds without a lock at all.
 	SkipLock bool
 
-	// LayoutPath is the OCI image layout to write. It is created if absent.
-	LayoutPath string
-	// Tag optionally names the subject in the layout index.
+	// Destination is where to publish: "oci-layout://./artifact" for a local
+	// layout, or "oci://registry.example.com/team/config" for a registry.
+	// A bare reference is treated as a registry reference.
+	Destination string
+	// Tag optionally names the subject at the destination. It is assigned
+	// last, after the published manifest has been read back and compared.
 	Tag string
 	// Limits tightens the client's bounds for this operation.
 	Limits Limits
@@ -71,8 +74,11 @@ type BuildResult struct {
 	FileCount      int64
 	TotalBytes     int64
 	LayerBytes     int64
-	LayoutPath     string
-	Tag            string
+	// Reference is the canonical digest reference of what was published.
+	// A result always names its subject by digest, never by the tag it may
+	// also carry (DP-007).
+	Reference string
+	Tag       string
 
 	// Lock is the resolution this build used, whether loaded or generated.
 	Lock *bundle.Lock
@@ -92,8 +98,28 @@ func (c *Client) Build(ctx context.Context, req BuildRequest) (_ *BuildResult, r
 	if err := c.checkOpen(); err != nil {
 		return nil, err
 	}
-	if req.LayoutPath == "" {
-		return nil, fault.New(fault.CodeInvalidInput, "build", "a destination layout path is required")
+	if req.Destination == "" {
+		return nil, fault.New(fault.CodeInvalidInput, "build", "a destination is required")
+	}
+	destination, err := artifact.ParseReference(req.Destination)
+	if err != nil {
+		return nil, err
+	}
+	if destination.IsDigest() {
+		return nil, fault.New(fault.CodeInvalidInput, "build",
+			"a build destination names a repository, not a digest")
+	}
+	if req.Tag != "" && destination.Tag != "" && req.Tag != destination.Tag {
+		return nil, fault.New(fault.CodeInvalidInput, "build",
+			"the destination and the tag option disagree about the tag to assign")
+	}
+	tag := req.Tag
+	if tag == "" {
+		tag = destination.Tag
+	}
+	transport, err := c.transportFor(destination)
+	if err != nil {
+		return nil, err
 	}
 
 	spec, baseDir, err := c.loadSpec(req)
@@ -147,39 +173,22 @@ func (c *Client) Build(ctx context.Context, req BuildRequest) (_ *BuildResult, r
 		return nil, err
 	}
 
-	layout, err := openOrCreateLayout(req.LayoutPath)
-	if err != nil {
-		return nil, err
-	}
-	defer func() {
-		if closeErr := layout.Close(); closeErr != nil && retErr == nil {
-			retErr = closeErr
-		}
-	}()
-
-	// The layer is buffered rather than streamed straight into the layout
-	// because a content-addressed store cannot name a blob until it knows
-	// its digest. Phase 3 replaces this with a staged blob write for
-	// registry-sized payloads.
+	// The layer is buffered because content-addressed storage cannot name a
+	// blob until it knows its digest, and the digest is only known once the
+	// last byte has been written.
 	var layerBuffer sizedBuffer
 	subject, err := canonical.Package(ctx, records, resolved.composed, &layerBuffer)
 	if err != nil {
 		return nil, err
 	}
-
-	if _, err := layout.PutBlob(layerBuffer.Bytes()); err != nil {
-		return nil, err
-	}
-	if _, err := layout.PutBlob(subject.ConfigBytes); err != nil {
-		return nil, err
-	}
-	if _, err := layout.PutBlob(subject.ManifestBytes); err != nil {
-		return nil, err
+	if subject.LayerSize > limits.Limits.MaxCompressedBytes {
+		return nil, fault.New(fault.CodeLimitExceeded, "build",
+			fmt.Sprintf("layer is %d bytes, the limit is %d",
+				subject.LayerSize, limits.Limits.MaxCompressedBytes))
 	}
 
-	// The index entry, and any tag, only after every blob is durable.
-	artifactType, _ := subject.Config.Format.ArtifactType()
-	if err := layout.AddManifest(subject.Descriptor(), artifactType, req.Tag); err != nil {
+	published, err := c.publish(ctx, transport, destination, subject, layerBuffer.Bytes(), tag)
+	if err != nil {
 		return nil, err
 	}
 
@@ -187,7 +196,7 @@ func (c *Client) Build(ctx context.Context, req BuildRequest) (_ *BuildResult, r
 		"subject", subject.ManifestDigest.String(),
 		"sources", len(spec.Spec.Sources),
 		"files", subject.Config.FileCount,
-		"layout", layout.Path())
+		"destination", published.String())
 
 	return &BuildResult{
 		SubjectDigest:  subject.ManifestDigest.String(),
@@ -200,8 +209,8 @@ func (c *Client) Build(ctx context.Context, req BuildRequest) (_ *BuildResult, r
 		FileCount:      subject.Config.FileCount,
 		TotalBytes:     subject.Config.TotalSize,
 		LayerBytes:     subject.LayerSize,
-		LayoutPath:     layout.Path(),
-		Tag:            req.Tag,
+		Reference:      published.String(),
+		Tag:            tag,
 		Lock:           lock,
 		LockBytes:      lockBytes,
 	}, nil
@@ -467,10 +476,9 @@ func writeFileAtomic(path string, content []byte) (retErr error) {
 
 // VerifyRequest describes a subject to verify.
 type VerifyRequest struct {
-	// LayoutPath is the OCI image layout to read.
-	LayoutPath string
-	// Reference is a digest or a tag. A tag is resolved once, and the
-	// resolved digest is what the rest of the operation uses.
+	// Reference is the subject to verify: a registry or layout reference,
+	// by tag or by digest. A tag is resolved once and the resolved digest is
+	// what every later step uses.
 	Reference string
 	// RequireDigest rejects a tag before any content is fetched.
 	RequireDigest bool
@@ -483,19 +491,14 @@ type VerifyRequest struct {
 // Trust and semantics report not-evaluated in Phase 1: no policy evaluator
 // and no validator exist yet. They are reported rather than omitted, because
 // a caller needs to be able to see that they were not assessed (DP-010).
-func (c *Client) Verify(ctx context.Context, req VerifyRequest) (_ *policy.Report, retErr error) {
+func (c *Client) Verify(ctx context.Context, req VerifyRequest) (*policy.Report, error) {
 	if err := c.checkOpen(); err != nil {
 		return nil, err
 	}
-	subject, layout, err := c.loadSubject(ctx, req)
+	subject, _, err := c.loadSubject(ctx, req)
 	if err != nil {
 		return nil, err
 	}
-	defer func() {
-		if closeErr := layout.Close(); closeErr != nil && retErr == nil {
-			retErr = closeErr
-		}
-	}()
 
 	report := &policy.Report{
 		Integrity:     policy.StatusPass,
@@ -518,8 +521,7 @@ func (c *Client) Verify(ctx context.Context, req VerifyRequest) (_ *policy.Repor
 
 // ExpandRequest describes an expansion.
 type ExpandRequest struct {
-	LayoutPath string
-	Reference  string
+	Reference string
 	// Destination must not exist. v1 has no overwrite or merge option.
 	Destination   string
 	RequireDigest bool
@@ -551,8 +553,7 @@ func (c *Client) Expand(ctx context.Context, req ExpandRequest) (_ *ExpandResult
 
 	limits := c.effectiveLimits(req.Limits)
 
-	subject, layout, err := c.loadSubject(ctx, VerifyRequest{
-		LayoutPath:    req.LayoutPath,
+	subject, pinned, err := c.loadSubject(ctx, VerifyRequest{
 		Reference:     req.Reference,
 		RequireDigest: req.RequireDigest,
 		Limits:        req.Limits,
@@ -560,13 +561,16 @@ func (c *Client) Expand(ctx context.Context, req ExpandRequest) (_ *ExpandResult
 	if err != nil {
 		return nil, err
 	}
-	defer func() {
-		if closeErr := layout.Close(); closeErr != nil && retErr == nil {
-			retErr = closeErr
-		}
-	}()
 
-	layer, _, err := layout.OpenBlob(subject.LayerDigest)
+	transport, err := c.transportFor(pinned)
+	if err != nil {
+		return nil, err
+	}
+
+	// The layer streams rather than being buffered: it is the one blob that
+	// can be far larger than memory, and the extractor verifies it entry by
+	// entry as it arrives.
+	layer, err := transport.Fetch(ctx, pinned, subject.LayerDescriptor())
 	if err != nil {
 		return nil, err
 	}
@@ -611,88 +615,36 @@ func (c *Client) Expand(ctx context.Context, req ExpandRequest) (_ *ExpandResult
 
 // loadSubject resolves a reference and verifies the subject's integrity.
 //
-// The returned layout is open and belongs to the caller to close. On any
-// failure it is closed here, so an error path never leaks a handle.
-func (c *Client) loadSubject(ctx context.Context, req VerifyRequest) (_ *canonical.Subject, _ *oci.Layout, retErr error) {
-	if req.LayoutPath == "" {
-		return nil, nil, fault.New(fault.CodeInvalidInput, "verify", "a layout path is required")
-	}
+// The returned reference is pinned to a digest, so every caller works from
+// content rather than from a name that could change underneath it.
+func (c *Client) loadSubject(ctx context.Context, req VerifyRequest) (*canonical.Subject, artifact.Reference, error) {
 	if req.Reference == "" {
-		return nil, nil, fault.New(fault.CodeInvalidInput, "verify", "a reference is required")
+		return nil, artifact.Reference{}, fault.New(fault.CodeInvalidInput, "verify",
+			"a reference is required")
 	}
-	if req.RequireDigest {
-		if _, err := bundle.ParseDigest(req.Reference); err != nil {
-			return nil, nil, fault.New(fault.CodeInvalidInput, "verify",
-				"a digest reference is required, but a tag was supplied")
-		}
+
+	ref, err := artifact.ParseReference(req.Reference)
+	if err != nil {
+		return nil, artifact.Reference{}, err
 	}
-	if err := fault.FromContext(ctx, "verify", "verification canceled"); err != nil {
-		return nil, nil, err
+	if req.RequireDigest && !ref.IsDigest() {
+		// Refused before anything is fetched, so a policy that demands a
+		// digest never spends a request on a tag.
+		return nil, ref, fault.New(fault.CodeInvalidInput, "verify",
+			"a digest reference is required, but a tag was supplied")
+	}
+	if ref.Target() == "" {
+		return nil, ref, fault.New(fault.CodeInvalidInput, "verify",
+			"reference names neither a tag nor a digest")
+	}
+
+	transport, err := c.transportFor(ref)
+	if err != nil {
+		return nil, ref, err
 	}
 
 	limits := c.effectiveLimits(req.Limits)
-
-	layout, err := oci.Open(req.LayoutPath)
-	if err != nil {
-		return nil, nil, err
-	}
-	defer func() {
-		if retErr != nil {
-			retErr = stderrors.Join(retErr, layout.Close())
-		}
-	}()
-
-	item, err := layout.FindManifest(req.Reference)
-	if err != nil {
-		return nil, nil, err
-	}
-	manifestDigest, err := bundle.ParseDigest(item.Digest)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	manifestBytes, err := layout.GetBlob(manifestDigest, limits.Limits.MaxManifestBytes)
-	if err != nil {
-		return nil, nil, err
-	}
-	manifest, err := canonical.ParseManifest(manifestBytes)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	configDigest, err := manifest.Config.ParsedDigest()
-	if err != nil {
-		return nil, nil, err
-	}
-	configBytes, err := layout.GetBlob(configDigest, limits.Limits.MaxConfigBytes)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	layerDescriptor, err := manifest.Layer()
-	if err != nil {
-		return nil, nil, err
-	}
-	layerDigest, err := layerDescriptor.ParsedDigest()
-	if err != nil {
-		return nil, nil, err
-	}
-
-	subject, err := canonical.VerifySubject(manifestBytes, configBytes, layerDescriptor.Size, layerDigest)
-	if err != nil {
-		return nil, nil, err
-	}
-	return subject, layout, nil
-}
-
-func openOrCreateLayout(path string) (*oci.Layout, error) {
-	layout, err := oci.Open(path)
-	if err == nil {
-		return layout, nil
-	}
-	// Open fails for a path that is not yet a layout, which for a build
-	// destination is the ordinary case rather than an error.
-	return oci.Create(path)
+	return c.fetchSubject(ctx, transport, ref, limits.Limits)
 }
 
 // sizedBuffer accumulates the encoded layer.
@@ -704,3 +656,99 @@ func (s *sizedBuffer) Write(p []byte) (int, error) {
 }
 
 func (s *sizedBuffer) Bytes() []byte { return s.b }
+
+// CopyRequest describes a subject to copy between locations.
+type CopyRequest struct {
+	// Source is the subject to copy, by tag or by digest.
+	Source string
+	// Destination is where to write it.
+	Destination string
+	// Tag optionally names the copy at the destination. It is assigned last.
+	Tag string
+	// RequireDigest rejects a source tag before anything is fetched.
+	RequireDigest bool
+	// Limits tightens the client's bounds for this operation.
+	Limits Limits
+}
+
+// CopyResult describes a completed copy.
+type CopyResult struct {
+	SubjectDigest string
+	Source        string
+	Destination   string
+	Tag           string
+}
+
+// Copy moves a subject between registries, layouts, or repositories.
+//
+// The subject's integrity is verified at the source and the copy is published
+// under the same rules as a build, so a copy cannot launder a broken artifact
+// into a destination that looks authoritative.
+//
+// The subject digest is unchanged by definition: identity is a function of
+// content and format version, and a repository name is neither (DP-002).
+// Evidence is not copied here; that arrives with the referrer work in phase 4,
+// and until then a copy carries the payload only.
+func (c *Client) Copy(ctx context.Context, req CopyRequest) (_ *CopyResult, retErr error) {
+	if err := c.checkOpen(); err != nil {
+		return nil, err
+	}
+	if req.Destination == "" {
+		return nil, fault.New(fault.CodeInvalidInput, "copy", "a destination is required")
+	}
+
+	destination, err := artifact.ParseReference(req.Destination)
+	if err != nil {
+		return nil, err
+	}
+	if destination.IsDigest() {
+		return nil, fault.New(fault.CodeInvalidInput, "copy",
+			"a copy destination names a repository, not a digest")
+	}
+	tag := req.Tag
+	if tag == "" {
+		tag = destination.Tag
+	}
+
+	destinationTransport, err := c.transportFor(destination)
+	if err != nil {
+		return nil, err
+	}
+
+	subject, pinned, err := c.loadSubject(ctx, VerifyRequest{
+		Reference:     req.Source,
+		RequireDigest: req.RequireDigest,
+		Limits:        req.Limits,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	sourceTransport, err := c.transportFor(pinned)
+	if err != nil {
+		return nil, err
+	}
+
+	limits := c.effectiveLimits(req.Limits)
+	layer, err := fetchBlob(ctx, sourceTransport, pinned, subject.LayerDescriptor(),
+		limits.Limits.MaxCompressedBytes)
+	if err != nil {
+		return nil, err
+	}
+
+	published, err := c.publish(ctx, destinationTransport, destination, subject, layer, tag)
+	if err != nil {
+		return nil, err
+	}
+
+	c.logger.InfoContext(ctx, "copied bundle",
+		"subject", subject.ManifestDigest.String(),
+		"from", pinned.String(), "to", published.String())
+
+	return &CopyResult{
+		SubjectDigest: subject.ManifestDigest.String(),
+		Source:        pinned.String(),
+		Destination:   published.String(),
+		Tag:           tag,
+	}, nil
+}
