@@ -74,6 +74,12 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # The tag that triggered this run, stated rather than inferred.
+          # goreleaser otherwise resolves the current tag with `git describe`,
+          # which is ambiguous when two tags share a commit -- cutting v0.1.0
+          # on the same commit as v0.1.0-rc.1 made it pick the release
+          # candidate and try to overwrite an immutable release.
+          GORELEASER_CURRENT_TAG: ${{ github.ref_name }}
           # A fine-grained PAT with contents:write on thingzio/homebrew-tap.
           # Absent, .goreleaser.yaml skips the cask entirely rather than
           # failing a cross-repo push, so a release works before this is set.

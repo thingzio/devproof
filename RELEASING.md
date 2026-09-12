@@ -53,6 +53,18 @@ refused rather than warned about.
 The Homebrew cask is pushed to `thingzio/homebrew-tap` during step 2, so
 `brew install thingzio/tap/devproof` picks up the new version.
 
+## Release candidates
+
+A prerelease tag (`v0.1.0-rc.1`) exercises the whole path without publishing
+the Homebrew cask: `prerelease: auto` detects it and `skip_upload: auto` skips
+the cask for prereleases. Useful before a first release, or any release that
+changes the pipeline.
+
+The final tag goes on a *later* commit than its candidate. goreleaser is told
+the triggering tag explicitly via `GORELEASER_CURRENT_TAG`, so two tags on one
+commit no longer confuse it, but a release and its candidate pointing at the
+same tree is confusing for people too.
+
 ## The Homebrew tap
 
 The cask is published only when the repository has a `HOMEBREW_DEPLOY_KEY`
