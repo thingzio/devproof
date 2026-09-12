@@ -8,8 +8,11 @@ It turns files from local directories, Git repositories, and future source
 types into immutable OCI artifacts that can be verified, redistributed, and
 expanded back into their canonical filesystem form.
 
-> **Project status:** design phase. The commands and APIs below describe the
-> intended first implementation and are not available yet.
+> **Project status:** implemented and testable, not yet released. Everything
+> below works today. There is no tagged release, the Go API is `v1alpha1`, and
+> the bundle format is frozen but not yet declared stable — see
+> [compatibility](docs/compatibility.md) for what each version number will
+> promise.
 
 ## Why DevProof
 
@@ -37,7 +40,53 @@ sources -> manifest -> lock -> canonical tree -> OCI subject @ sha256:...
                                   verify -> safely expand to filesystem
 ```
 
-## Planned capabilities
+## Install
+
+```bash
+go install github.com/thingzio/devproof/cmd/devproof@latest
+```
+
+Or build from a checkout:
+
+```bash
+make build     # ./bin/devproof
+```
+
+Supported and gated in CI: Linux and macOS on amd64 and arm64. Windows binaries
+are built best-effort ([DP-035](docs/decisions.md)).
+
+## Try it
+
+```bash
+$ devproof build ./content --to oci-layout://./artifact --tag v1
+reference:       oci-layout://./artifact@sha256:e3d8f68bd8c485...
+subject:         sha256:e3d8f68bd8c485...
+tree digest:     sha256:168de0126f4a8c...
+format:          devproof-bundle-v1
+files:           2
+tag:             v1
+
+$ devproof verify oci-layout://./artifact:v1
+subject:         sha256:e3d8f68bd8c485...
+integrity:       pass
+trust:           not-evaluated
+semantics:       not-evaluated
+  [warning] policy-not-supplied: no verification policy was supplied, so trust
+  was not evaluated; integrity alone does not establish that this artifact came
+  from anyone in particular
+
+$ devproof expand oci-layout://./artifact:v1 --to ./expanded
+```
+
+Building the same tree again — on any supported platform, in any directory, at
+any time — produces that same subject digest. That is the property everything
+else rests on.
+
+`trust: not-evaluated` is deliberate, and is not a synonym for `pass`. Integrity
+says the bytes are what the artifact claims; it says nothing about who produced
+them. Supply a `--policy` to evaluate trust.
+
+## Capabilities
 
 - Go SDK as the primary API, with a thin CLI over the same operations.
 - Multiple named sources composed through explicit mount paths.
@@ -91,7 +140,7 @@ digests, filters, final path ownership, file inventory, and canonical bundle
 tree digest. A locked build fails rather than silently accepting changed
 material.
 
-## Intended CLI workflow
+## CLI workflow
 
 ```bash
 # Resolve mutable source references and create the lock.
@@ -112,15 +161,17 @@ devproof expand registry.example.com/team/config@sha256:... \
   --policy policy.yaml
 ```
 
-Direct single-source builds are also planned:
+A single local directory can be built directly, without a manifest:
 
 ```bash
 devproof build ./content --to oci-layout://./artifact
-
-devproof build https://github.com/example/config.git \
-  --git-ref 0123456789abcdef0123456789abcdef01234567 \
-  --to oci://registry.example.com/team/config:v1
 ```
+
+Git material goes through a manifest, which is what produces the lock that
+records the resolved commit.
+
+Registry credentials come from the Docker configuration, so `docker login`,
+`gh auth`, or `gcloud auth configure-docker` is the whole setup.
 
 ## Identity and evidence
 
@@ -158,7 +209,24 @@ The implementation contracts are documented in [docs](docs/README.md):
 - [Go SDK](docs/sdk.md) and [CLI](docs/cli.md);
 - [verification policy](docs/policy.md) and [security design](docs/security.md);
   and
-- [test strategy](docs/testing.md) and [implementation roadmap](docs/roadmap.md).
+- [test strategy](docs/testing.md) and [implementation roadmap](docs/roadmap.md);
+- [interoperability results](docs/interoperability.md) against other OCI
+  tooling and registries; and
+- [compatibility and migration policy](docs/compatibility.md).
+
+## Verifying the claims yourself
+
+The `conformance` package is a second reader of the bundle format, built only
+from the Go standard library and the format specification. It imports no other
+DevProof package, so it can disagree with the main implementation — and it is
+how the specification is checked against what the code actually produces
+rather than against itself.
+
+```go
+report, err := conformance.VerifyLayout("./artifact", "v1")
+```
+
+Contributions are welcome; see [CONTRIBUTING](CONTRIBUTING.md).
 
 ## License
 
