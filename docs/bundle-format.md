@@ -160,9 +160,17 @@ and unknown required semantics.
 The uncompressed layer is a deterministic POSIX tar stream produced from the
 config inventory and the frozen snapshot.
 
-Entries are emitted in canonical UTF-8 path order. Required parent directories
-are emitted before their first child and at most once. No root `.` entry is
-written.
+Entries are emitted in two runs: every required parent directory in canonical
+UTF-8 path order, followed by every file in canonical UTF-8 path order. Each
+directory appears at most once, and no root `.` entry is written.
+
+Two runs rather than one merged ordering. Both are deterministic, and both put
+every parent before its first child, since a parent is a byte-prefix of its
+children. Separating them makes the rule checkable without reference to the
+file list: a reader validates that directories ascend, that files ascend, and
+that no directory follows a file. A single merged order would require a reader
+to derive the expected directory set before it could tell correct placement
+from incorrect, which is more work to state and more work to get right.
 
 Every directory header has:
 

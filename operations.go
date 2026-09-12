@@ -2,7 +2,10 @@ package devproof
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"time"
@@ -182,11 +185,27 @@ func (c *Client) Build(ctx context.Context, req BuildRequest) (_ *BuildResult, r
 		return nil, err
 	}
 
-	// The layer is buffered because content-addressed storage cannot name a
-	// blob until it knows its digest, and the digest is only known once the
-	// last byte has been written.
-	var layerBuffer sizedBuffer
-	subject, err := canonical.Package(ctx, records, resolved.composed, &layerBuffer)
+	// The layer is staged in full before publication, because
+	// content-addressed storage cannot name a blob until it knows its digest,
+	// and the digest is only known once the last byte has been written.
+	//
+	// Staged to a file rather than to memory. The ordering constraint says the
+	// bytes must all exist before the manifest does; it does not say they must
+	// be resident. Buffering meant peak memory tracked payload size, so the
+	// documented 8 GiB expansion limit was not survivable on an ordinary CI
+	// runner — the limit a caller configures should be bounded by their disk,
+	// not silently by their RAM.
+	staged, err := newStagedLayer(c.tempRoot)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		if closeErr := staged.Close(); closeErr != nil && retErr == nil {
+			retErr = closeErr
+		}
+	}()
+
+	subject, err := canonical.Package(ctx, records, resolved.composed, staged)
 	if err != nil {
 		return nil, err
 	}
@@ -196,7 +215,7 @@ func (c *Client) Build(ctx context.Context, req BuildRequest) (_ *BuildResult, r
 				subject.LayerSize, limits.Limits.MaxCompressedBytes))
 	}
 
-	published, err := c.publish(ctx, transport, destination, subject, layerBuffer.Bytes(), tag)
+	published, err := c.publish(ctx, transport, destination, subject, staged, tag)
 	if err != nil {
 		return nil, err
 	}
@@ -838,15 +857,96 @@ func (c *Client) loadSubject(ctx context.Context, req VerifyRequest) (*canonical
 	return c.fetchSubject(ctx, transport, ref, limits.Limits)
 }
 
-// sizedBuffer accumulates the encoded layer.
-type sizedBuffer struct{ b []byte }
-
-func (s *sizedBuffer) Write(p []byte) (int, error) {
-	s.b = append(s.b, p...)
-	return len(p), nil
+// layerSource supplies the layer bytes for publication.
+//
+// An interface because the two producers differ: a build encodes the layer,
+// and a copy streams it from the source registry. Both stage to disk, so
+// neither holds a payload-sized buffer.
+type layerSource interface {
+	Reader() (io.Reader, error)
 }
 
-func (s *sizedBuffer) Bytes() []byte { return s.b }
+// stagedLayer holds the encoded layer on disk until it can be named.
+//
+// It is written once and then read once, so it never needs to be resident.
+// The file is unlinked as soon as it is created: nothing else opens it by
+// name, so removing the directory entry immediately means a crash cannot
+// leave scratch behind, and no other process can observe or substitute it.
+type stagedLayer struct {
+	file *os.File
+}
+
+func newStagedLayer(tempRoot string) (*stagedLayer, error) {
+	file, err := os.CreateTemp(tempRoot, "devproof-layer-*")
+	if err != nil {
+		return nil, fault.Wrap(fault.CodeInternal, "build", "creating the layer staging file", err)
+	}
+	if err := os.Remove(file.Name()); err != nil {
+		_ = file.Close()
+		return nil, fault.Wrap(fault.CodeInternal, "build", "unlinking the layer staging file", err)
+	}
+	return &stagedLayer{file: file}, nil
+}
+
+func (s *stagedLayer) Write(p []byte) (int, error) { return s.file.Write(p) }
+
+// Reader rewinds and returns the staged bytes.
+//
+// Returning a fresh reader each call rather than caching one means a retry
+// that re-pushes the layer starts from the beginning, instead of sending
+// whatever was left after the previous attempt.
+//
+// The file is wrapped so that only Read is visible. A transport handed an
+// *os.File sees an io.Closer and closes it, which takes the file away from
+// its owner before the next blob is pushed; net/http additionally sees a
+// file and reaches for sendfile, which is unavailable in some sandboxed
+// environments. Neither is the transport's decision to make.
+func (s *stagedLayer) Reader() (io.Reader, error) {
+	if _, err := s.file.Seek(0, io.SeekStart); err != nil {
+		return nil, fault.Wrap(fault.CodeInternal, "build", "rewinding the staged layer", err)
+	}
+	return readOnly{s.file}, nil
+}
+
+// readOnly hides every method of the wrapped reader except Read.
+type readOnly struct{ r io.Reader }
+
+func (r readOnly) Read(p []byte) (int, error) { return r.r.Read(p) }
+
+// fill streams a reader into the staging file, verifying as it goes.
+//
+// The digest is checked here rather than after a full read into memory,
+// which is what lets a copy of an arbitrarily large layer run in constant
+// space while still refusing content that does not match its descriptor.
+func (s *stagedLayer) fill(r io.Reader, want artifact.Descriptor) error {
+	hasher := sha256.New()
+	// One byte past the declared size, so content longer than the descriptor
+	// claims is detected rather than silently truncated to a match.
+	written, err := io.Copy(io.MultiWriter(s.file, hasher),
+		io.LimitReader(r, want.Size+1))
+	if err != nil {
+		return fault.Wrap(fault.CodeTransport, "copy", "staging the layer", err)
+	}
+	if written != want.Size {
+		return fault.New(fault.CodeDigestMismatch, "copy",
+			fmt.Sprintf("the layer descriptor declares %d bytes, the source served %d",
+				want.Size, written))
+	}
+	got := "sha256:" + hex.EncodeToString(hasher.Sum(nil))
+	if got != want.Digest {
+		return fault.New(fault.CodeDigestMismatch, "copy",
+			fmt.Sprintf("the layer descriptor declares %s, the source served %s",
+				want.Digest, got))
+	}
+	return nil
+}
+
+func (s *stagedLayer) Close() error {
+	if err := s.file.Close(); err != nil {
+		return fault.Wrap(fault.CodeInternal, "build", "closing the staged layer", err)
+	}
+	return nil
+}
 
 // CopyRequest describes a subject to copy between locations.
 type CopyRequest struct {
@@ -921,13 +1021,40 @@ func (c *Client) Copy(ctx context.Context, req CopyRequest) (_ *CopyResult, retE
 	}
 
 	limits := c.effectiveLimits(req.Limits)
-	layer, err := fetchBlob(ctx, sourceTransport, pinned, subject.LayerDescriptor(),
-		limits.Limits.MaxCompressedBytes)
+	layerDescriptor := subject.LayerDescriptor()
+	if validateErr := layerDescriptor.Validate(); validateErr != nil {
+		return nil, validateErr
+	}
+	if limit := limits.Limits.MaxCompressedBytes; limit > 0 && layerDescriptor.Size > limit {
+		return nil, fault.New(fault.CodeLimitExceeded, "copy",
+			fmt.Sprintf("layer is %d bytes, the limit is %d", layerDescriptor.Size, limit))
+	}
+
+	// Streamed through a staging file rather than buffered, so copying a
+	// large bundle costs disk rather than memory.
+	staged, err := newStagedLayer(c.tempRoot)
 	if err != nil {
 		return nil, err
 	}
+	defer func() {
+		if closeErr := staged.Close(); closeErr != nil && retErr == nil {
+			retErr = closeErr
+		}
+	}()
 
-	published, err := c.publish(ctx, destinationTransport, destination, subject, layer, tag)
+	source, err := sourceTransport.Fetch(ctx, pinned, layerDescriptor)
+	if err != nil {
+		return nil, err
+	}
+	fillErr := staged.fill(source, layerDescriptor)
+	if closeErr := source.Close(); closeErr != nil && fillErr == nil {
+		fillErr = fault.Wrap(fault.CodeInternal, "copy", "closing the fetched layer", closeErr)
+	}
+	if fillErr != nil {
+		return nil, fillErr
+	}
+
+	published, err := c.publish(ctx, destinationTransport, destination, subject, staged, tag)
 	if err != nil {
 		return nil, err
 	}

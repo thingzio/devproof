@@ -1,0 +1,126 @@
+# Interoperability
+
+DevProof artifacts are ordinary OCI artifacts. This document records what that
+claim survives contact with, and how to reproduce each result.
+
+The claim under test is narrow and checkable: a DevProof subject can be stored,
+copied, and served by general-purpose OCI tooling without any of that tooling
+knowing what DevProof is, and its digest does not change when it passes
+through.
+
+## Results
+
+Verified against `registry:3` and the tool versions noted. The subject digest
+is the same value in every row, which is the point: identity is a function of
+content, and a repository, a transport, or a copying tool is not content.
+
+| Tool | Operation | Result |
+| --- | --- | --- |
+| `skopeo` 1.24 | `inspect --raw oci:./layout:v1` | reads the manifest, reports artifactType |
+| `skopeo` 1.24 | `copy oci:./layout:v1 oci:./copy:v1` | copied; DevProof verifies the copy, same digest |
+| `skopeo` 1.24 | `copy docker://… oci:./out:v1` | registry to layout; same digest |
+| `crane` | `digest <registry ref>` | reports the identical subject digest |
+| `oras` 1.x | `manifest fetch --oci-layout` | reads the manifest from a layout |
+| `oras` 1.x | `copy … --to-oci-layout` | full content copy; DevProof verifies it |
+| `docker` 29.8 | `pull` | refuses: not a runnable image (expected) |
+| bsdtar 3.5 / libarchive 3.7 | `tar xzf <layer blob>` | extracts; mode `0644`, epoch mtime |
+| GNU tar 1.35 | `tar xzf -` | extracts; mode `0644`, epoch mtime |
+| busybox tar 1.37 | `tar xzf -` | extracts; mode `0644`, epoch mtime |
+
+### Reproducing
+
+```bash
+docker run -d --rm -p 15000:5000 --name reg registry:3
+
+devproof build ./src --to oci-layout://./layout --tag v1
+skopeo inspect --raw oci:./layout:v1
+skopeo copy oci:./layout:v1 oci:./copy:v1
+devproof verify oci-layout://./copy:v1
+
+DEVPROOF_INSECURE_REGISTRY=1 devproof build ./src \
+  --to oci://localhost:15000/team/config --tag v1
+crane digest --insecure localhost:15000/team/config:v1
+oras copy localhost:15000/team/config:v1 --to-oci-layout ./pulled:v1
+devproof verify oci-layout://./pulled:v1
+```
+
+## Notes on specific tools
+
+### `docker pull` refuses, and should
+
+A DevProof subject is not a runnable container image. It has one layer and a
+DevProof config media type, so a runtime that tried to use it as a root
+filesystem would be interpreting it as something it is not. Docker reports
+`mismatched image rootfs and manifest layers` and stops, which is the correct
+outcome — the artifact is not mislabeled as an image, so nothing is tricked
+into running it.
+
+Registries store and serve it fine. Storage and execution are different
+questions.
+
+### `oras pull` needs `oras copy` instead
+
+`oras pull` is file-oriented: it extracts layers using the
+`org.opencontainers.image.title` annotation as a filename, and reports
+`Skipped pulling layers without file name` when there is none.
+
+DevProof subjects carry no annotations at all, by design. An annotation on the
+subject manifest would change its digest, which would make identity depend on
+metadata rather than content (DP-002).
+
+Use `oras copy --to-oci-layout` for a full content copy, or `devproof expand`
+for the payload as files. Both are in the matrix above.
+
+### The layer is a plain tar+gzip
+
+```bash
+tar tzvf layout/blobs/sha256/<layer-digest>
+tar xzf  layout/blobs/sha256/<layer-digest> -C ./out
+```
+
+This is the roadmap's "external consumer can use an expanded bundle without
+bespoke payload transformation" criterion, and it holds in the strongest form:
+the transformation needed is `tar`.
+
+Three unrelated tar implementations — libarchive, GNU, and busybox — extract it
+with identical results, including the normalized mode and the epoch timestamp.
+That the canonical encoding is strict has not made it exotic.
+
+What `tar` does not give you is verification. It will happily extract a layer
+whose content does not match its descriptor, and it applies none of the path
+and mode rules that make expansion safe. Use it to confirm the payload is
+ordinary, not to consume the artifact.
+
+## Registry compatibility
+
+The transport uses only the OCI Distribution Spec 1.1.1 pull, push, and
+referrers APIs, with no registry-specific behavior.
+
+The referrers API is the one place where registries genuinely differ. A
+registry that does not implement it causes evidence to be discovered through
+the fallback tag scheme, which is reported rather than silently used, and which
+a policy must opt into (DP-028). A consumer therefore always knows which
+mechanism produced the evidence it is judging.
+
+Tested: `registry:3` (distribution), which implements referrers natively.
+
+Untested here, because they need accounts rather than code: GHCR, ECR, GAR,
+ACR, Docker Hub, Quay, Artifactory, Harbor, and Nexus. The harness above is
+what to point at them — set `DEVPROOF_INSECURE_REGISTRY` aside, authenticate
+with `docker login`, and run the same sequence.
+
+## Independent verification
+
+`conformance` is a second reader built only from the Go standard library and
+the format specification, sharing no code with the writer (DP-034). It is the
+strongest interoperability evidence here, because it does not depend on any
+other tool agreeing with us — it checks the artifact against the document that
+describes it.
+
+```go
+report, err := conformance.VerifyLayout("./layout", "v1")
+```
+
+It recomputes the tree digest from the layer bytes rather than reading it from
+the config, so a config that agreed with itself but not with its payload is
+caught.

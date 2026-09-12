@@ -116,26 +116,16 @@ func (t *LayoutTransport) Push(_ context.Context, ref artifact.Reference, target
 		return validateErr
 	}
 
-	// Buffered because the layout is content-addressed and cannot name a
-	// blob before it knows its digest. The descriptor's declared size bounds
-	// the read, so a reader that claims to be small and is not cannot force
-	// an unbounded allocation.
-	body, err := io.ReadAll(io.LimitReader(content, target.Size+1))
+	// Streamed rather than buffered. The layer can be far larger than memory,
+	// and reading it into a slice just to hash it once would make peak memory
+	// track payload size. The content is hashed while it is written and the
+	// blob is published only if the digest is the expected one, so a blob is
+	// still never filed under a digest it does not have.
+	digest, err := target.ParsedDigest()
 	if err != nil {
-		return fault.Wrap(fault.CodeInternal, layoutTransportOp, "reading content to store", err)
+		return err
 	}
-	if int64(len(body)) != target.Size {
-		return fault.New(fault.CodeDigestMismatch, layoutTransportOp,
-			fmt.Sprintf("content is %d bytes, the descriptor declares %d", len(body), target.Size))
-	}
-	// Verified before it is written, so a blob can never be filed under a
-	// digest it does not have.
-	if verifyErr := target.VerifyContent(body); verifyErr != nil {
-		return verifyErr
-	}
-
-	_, err = layout.PutBlob(body)
-	return err
+	return layout.PutBlobStream(content, digest, target.Size)
 }
 
 // Tag assigns a mutable name to an already-stored manifest.

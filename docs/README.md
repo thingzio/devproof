@@ -94,6 +94,10 @@ adding or replacing evidence does not change the subject digest.
   and safe extraction.
 - [Testing](testing.md): golden vectors, determinism, fuzzing, interoperability,
   and failure tests.
+- [Interoperability](interoperability.md): verified results against other OCI
+  tooling, with commands to reproduce them.
+- [Compatibility](compatibility.md): what each version number promises, and how
+  to migrate across format and API versions.
 - [Roadmap](roadmap.md): implementation order and exit criteria.
 
 ## Standards baseline

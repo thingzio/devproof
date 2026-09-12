@@ -1,0 +1,122 @@
+# Release build for the devproof CLI.
+#
+# A tool that exists to make other people's artifacts verifiable has to ship
+# verifiably itself. Every release carries checksums, an SBOM per binary, a
+# keyless signature over the checksum file, and build provenance attested by
+# the workflow that produced it.
+#
+# Nothing here affects bundle bytes. Version and commit are stamped into the
+# binary for diagnostics and provenance only: two DevProof releases packaging
+# the same canonical tree must produce the same subject digest (DP-012).
+version: 2
+
+project_name: devproof
+
+before:
+  hooks:
+    - go mod download
+    - go mod verify
+
+builds:
+  - id: devproof
+    main: ./cmd/devproof
+    binary: devproof
+    env:
+      # No cgo: a static binary runs on whatever the runner has, and the
+      # result does not depend on the build host's system libraries.
+      - CGO_ENABLED=0
+    flags:
+      # Absolute paths in a binary leak the builder's filesystem layout and
+      # make two builds of the same source differ.
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X github.com/thingzio/devproof/internal/version.version={{ .Version }}
+      - -X github.com/thingzio/devproof/internal/version.commit={{ .FullCommit }}
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    # Windows is deliberately absent. The format is designed to be producible
+    # and consumable there, but executable-mode representation and atomic
+    # directory publication are not yet proven on it, so Windows is not in the
+    # determinism matrix and exclusiveRename fails rather than falling back to
+    # something racy (DP-022). Shipping a binary whose central guarantee is
+    # untested on its platform would be worse than shipping none.
+    mod_timestamp: '{{ .CommitTimestamp }}'
+
+archives:
+  - id: devproof
+    ids:
+      - devproof
+    formats:
+      - tar.gz
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
+    files:
+      - LICENSE
+      - NOTICE
+      - README.md
+      - SECURITY.md
+
+checksum:
+  name_template: 'checksums.txt'
+  algorithm: sha256
+
+sboms:
+  - id: archive-sboms
+    artifacts: archive
+    documents:
+      - '${artifact}.spdx.json'
+
+# Keyless signing over the checksum file.
+#
+# Signing the checksums rather than each archive is deliberate: the checksum
+# file already commits to every artifact by digest, so one signature covers
+# the whole release and there is exactly one thing to verify.
+signs:
+  - cmd: cosign
+    certificate: '${artifact}.pem'
+    args:
+      - sign-blob
+      - '--output-certificate=${certificate}'
+      - '--output-signature=${signature}'
+      - '${artifact}'
+      - --yes
+    artifacts: checksum
+    output: true
+
+snapshot:
+  version_template: '{{ incpatch .Version }}-next'
+
+changelog:
+  use: github-native
+
+release:
+  draft: true
+  prerelease: auto
+  footer: |
+    ## Verifying this release
+
+    Every artifact is covered by `checksums.txt`, which is signed with a
+    Sigstore keyless signature. Verify the signature first, then the checksums:
+
+    ```bash
+    cosign verify-blob checksums.txt \
+      --certificate checksums.txt.pem \
+      --signature checksums.txt.sig \
+      --certificate-identity-regexp 'https://github\.com/thingzio/devproof/\.github/workflows/release\.yaml@.*' \
+      --certificate-oidc-issuer https://token.actions.githubusercontent.com
+
+    sha256sum --check --ignore-missing checksums.txt
+    ```
+
+    Build provenance is attested separately and can be verified with:
+
+    ```bash
+    gh attestation verify devproof_*_linux_amd64.tar.gz --repo thingzio/devproof
+    ```
+
+    An SBOM in SPDX form accompanies each archive.

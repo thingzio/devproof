@@ -1,0 +1,88 @@
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+# A release is not a place to discover that the tests fail, so the full gate
+# runs again here against the exact tagged commit rather than trusting that CI
+# passed on the branch it came from.
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: true
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: .go-version
+          check-latest: true
+      - name: test
+        run: make cover
+      - name: conformance
+        # The independent reader, run against the tagged tree. It shares no
+        # code with the writer, so this is the check that the artifact matches
+        # the specification rather than matching the code that produced it.
+        run: go test ./conformance/...
+
+  release:
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      # Keyless signing exchanges this token for a Fulcio certificate. No
+      # private key exists to leak, and the resulting certificate names the
+      # workflow that produced the release.
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: .go-version
+          check-latest: true
+      - id: versions
+        uses: ./.github/actions/load-versions
+
+      - uses: anchore/sbom-action/download-syft@v0
+        with:
+          syft-version: ${{ steps.versions.outputs.syft }}
+      - uses: sigstore/cosign-installer@v3
+
+      - name: goreleaser
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          version: ${{ steps.versions.outputs.goreleaser }}
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Provenance attests what built the archives and from which source. It
+      # is produced by the workflow rather than by the build, so a compromised
+      # build step cannot forge it.
+      - name: attest build provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: 'dist/*.tar.gz'
+
+      - name: verify the release signature
+        # Verified here rather than assumed: a signature nobody checks is a
+        # signature nobody knows is broken. This fails the release rather than
+        # publishing artifacts whose signature does not verify.
+        run: |
+          cosign verify-blob dist/checksums.txt \
+            --certificate dist/checksums.txt.pem \
+            --signature dist/checksums.txt.sig \
+            --certificate-identity-regexp \
+              "https://github\.com/${GITHUB_REPOSITORY}/\.github/workflows/release\.yaml@.*" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com

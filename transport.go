@@ -43,22 +43,31 @@ func (c *Client) publish(
 	transport artifact.Transport,
 	ref artifact.Reference,
 	subject *canonical.Subject,
-	layer []byte,
+	layer layerSource,
 	tag string,
 ) (artifact.Reference, error) {
 
+	// The layer is opened lazily and streamed, so publishing a large bundle
+	// does not require holding it in memory. The config is small and bounded
+	// by its own limit, so it stays a slice.
 	blobs := []struct {
 		descriptor artifact.Descriptor
-		content    []byte
+		open       func() (io.Reader, error)
 	}{
-		{subject.LayerDescriptor(), layer},
-		{subject.ConfigDescriptor(), subject.ConfigBytes},
+		{subject.LayerDescriptor(), layer.Reader},
+		{subject.ConfigDescriptor(), func() (io.Reader, error) {
+			return bytes.NewReader(subject.ConfigBytes), nil
+		}},
 	}
 	for _, blob := range blobs {
 		if err := fault.FromContext(ctx, transportOp, "publication canceled"); err != nil {
 			return ref, err
 		}
-		if err := transport.Push(ctx, ref, blob.descriptor, bytes.NewReader(blob.content)); err != nil {
+		content, err := blob.open()
+		if err != nil {
+			return ref, err
+		}
+		if err := transport.Push(ctx, ref, blob.descriptor, content); err != nil {
 			return ref, err
 		}
 	}

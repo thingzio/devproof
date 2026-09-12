@@ -289,6 +289,17 @@ be expanded anywhere.
 Limits are enforced against both declared sizes and actual streamed bytes. A
 small declared size never disables the streaming check.
 
+These numbers were guesses when they were written and are now measured. The
+benchmarks in `benchmark_test.go` are the measurement, and what they establish
+is that the limits are bounded by disk and time rather than by memory: build,
+verify, and expand all allocate independently of payload size (DP-033). On an
+Apple M3 Pro, an 80 MiB payload builds with a peak heap of roughly 17 MiB and
+expands with roughly 240 KiB of allocation.
+
+Without that property the 8 GiB expansion default would have been dishonest —
+a limit a caller is invited to configure, but which their RAM would refuse
+first.
+
 ## DP-021: Limits compose by intersection; the strictest value wins
 
 Three inputs can bound one operation: the client's `Limits`, a per-request
@@ -528,6 +539,66 @@ confident, unfounded trust.
 Verification remains three-dimensional here as everywhere else. Without a
 policy, expansion still checks integrity and reports trust as not-evaluated
 rather than as passing.
+
+## DP-033: Memory is independent of payload size
+
+No operation holds a payload-sized buffer. Build stages the encoded layer to an
+unlinked temporary file, the layout transport hashes and writes blobs as they
+stream, copy streams from source to staging to destination, and expansion has
+streamed since it was written.
+
+This is a correctness property, not a performance one. The default limits allow
+an 8 GiB expansion and a 2 GiB compressed layer. If memory tracked payload
+size, those numbers would be fiction: the real limit would be the caller's RAM,
+it would differ on every machine, and it would be discovered by being killed
+rather than by a typed error. A limit the caller configures should be bounded
+by what they configured.
+
+Content-addressed storage cannot name a blob before it knows its digest, so the
+bytes must all exist before the manifest does. That constrains *ordering*, not
+*residency*, and the two were conflated in the first implementation: the layer
+was accumulated with `append`, which allocated roughly seven times the payload
+and peaked at about twice it.
+
+The staging file is unlinked immediately after it is created. Nothing opens it
+by name, so removing the directory entry means a crash cannot leave scratch
+behind and no other process can observe or substitute it.
+
+The staged layer is handed to transports as a reader exposing nothing but
+`Read`. Passing the `*os.File` directly let a transport see an `io.Closer` and
+close a file it did not open, taking it away from its owner before the next
+blob was pushed, and let `net/http` reach for `sendfile`, which is unavailable
+in some sandboxed environments. Neither is the transport's decision.
+
+`TestBuildMemoryDoesNotScaleWithPayload` measures bytes allocated rather than
+allocation count, because buffering a payload changes how much is allocated
+while barely changing how many times.
+
+## DP-034: The conformance reader shares no code with the writer
+
+`conformance` is a second implementation of the read side, built only from the
+Go standard library and the format specification. It imports no other DevProof
+package: not the media-type constants, not the canonical encoders, not the
+digest helpers. Every value it compares against is transcribed from the
+specification, and every structure it parses it parses again from scratch.
+
+A test that checks a writer against its own reader proves only that the two
+agree. If both share a constant, a sort order, or an encoding helper, they
+share its bugs, and a round trip passes while the artifact is unreadable by
+anyone else. The whole value of this package is that it *can* disagree.
+
+It earned its place immediately: it found that the specification's description
+of tar entry order did not match what the encoder produced. The encoder emits
+every required directory in sorted order and then every file in sorted order;
+the specification described a single merged path order. The specification was
+corrected rather than the encoder, because both schemes are deterministic and
+both put every parent before its first child, while changing the encoder would
+have altered every layer digest ever produced.
+
+It is deliberately simple and unoptimized. It buffers where a streaming reader
+would not, because being obviously correct matters more here than being fast,
+and a second implementation clever enough to be wrong in the same way as the
+first has no value.
 
 ## Open decisions
 

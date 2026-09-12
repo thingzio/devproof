@@ -214,6 +214,79 @@ func (l *Layout) PutBlob(content []byte) (canonical.Digest, error) {
 	return digest, nil
 }
 
+// PutBlobStream stores a blob by streaming it, verifying as it goes.
+//
+// The layer can be far larger than memory, and reading it into a slice just to
+// hash it once would make peak memory track payload size. Instead the content
+// is hashed while it is written to a temporary file, and the file is published
+// under its digest only once the digest is known to be the expected one.
+//
+// want is the digest the caller expects. A blob is never filed under a digest
+// it does not have, so a source that served different bytes is caught here
+// rather than becoming a corrupt layout.
+func (l *Layout) PutBlobStream(content io.Reader, want canonical.Digest, size int64) (retErr error) {
+	target := blobPath(want)
+	if _, statErr := l.root.Stat(target); statErr == nil {
+		// Content-addressed: an existing blob at this digest already holds
+		// these bytes.
+		return nil
+	}
+
+	if dir := filepath.Dir(target); dir != "." {
+		if err := l.root.MkdirAll(dir, 0o755); err != nil {
+			return fault.Wrap(fault.CodeInternal, layoutOp, "creating directory", err).WithPath(target)
+		}
+	}
+
+	// Named from the expected digest for the same reason as writeFileAtomic:
+	// two concurrent writers of one blob pick the same temporary name, so the
+	// loser's rename is a harmless no-op instead of an orphaned file.
+	temp := target + ".tmp-" + want.Hex()[:16]
+	file, err := l.root.OpenFile(temp, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	if err != nil {
+		return fault.Wrap(fault.CodeInternal, layoutOp, "creating file", err).WithPath(target)
+	}
+	defer func() {
+		if retErr != nil {
+			_ = l.root.Remove(temp)
+		}
+	}()
+
+	hasher := sha256.New()
+	// One byte past the declared size, so a source serving more than it
+	// promised is reported rather than silently truncated to a match.
+	written, err := io.Copy(io.MultiWriter(file, hasher), io.LimitReader(content, size+1))
+	if err != nil {
+		_ = file.Close()
+		return fault.Wrap(fault.CodeInternal, layoutOp, "writing blob", err).WithPath(target)
+	}
+	if written != size {
+		_ = file.Close()
+		return fault.New(fault.CodeDigestMismatch, layoutOp,
+			fmt.Sprintf("content is %d bytes, the descriptor declares %d", written, size))
+	}
+	if got := canonical.Digest(hasher.Sum(nil)); got != want {
+		_ = file.Close()
+		return fault.New(fault.CodeDigestMismatch, layoutOp,
+			fmt.Sprintf("content hashes to %s but was offered as %s", got, want))
+	}
+
+	// Sync before the rename: without it a crash can leave the rename durable
+	// while the content is not, which is a zero-length blob at a digest-shaped
+	// name.
+	if err := file.Sync(); err != nil {
+		_ = file.Close()
+		return fault.Wrap(fault.CodeInternal, layoutOp, "syncing file", err).WithPath(target)
+	}
+	if err := file.Close(); err != nil {
+		return fault.Wrap(fault.CodeInternal, layoutOp, "closing file", err).WithPath(target)
+	}
+	if err := l.root.Rename(temp, target); err != nil {
+		return fault.Wrap(fault.CodeInternal, layoutOp, "publishing file", err).WithPath(target)
+	}
+	return nil
+}
+
 // GetBlob reads a blob, verifying it against its digest.
 //
 // limit bounds the read so that a layout directory someone else can write
