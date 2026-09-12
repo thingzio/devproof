@@ -175,12 +175,13 @@ jobs:
         with:
           go-version-file: .go-version
           check-latest: true
-      - id: versions
-        uses: ./.github/actions/load-versions
+      # `make vuln` rather than govulncheck directly: the Makefile target holds
+      # the documented allowlist for findings that are unfixable and
+      # unreachable, and running the raw tool here meant CI and the local gate
+      # disagreed about what "green" means -- which is the one thing the gate
+      # exists to prevent.
       - name: govulncheck
-        run: |
-          go install "golang.org/x/vuln/cmd/govulncheck@${{ steps.versions.outputs.govulncheck }}"
-          govulncheck ./...
+        run: make vuln
 
   build:
     runs-on: ubuntu-latest

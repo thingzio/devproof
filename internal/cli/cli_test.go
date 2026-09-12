@@ -635,9 +635,14 @@ func TestCompletionScriptsGoToStdout(t *testing.T) {
 	}
 }
 
-// Cancellation exits 130, the shell's convention for death by SIGINT, rather
-// than the operation's own code (DP-023).
-func TestCancellationExitsInterrupted(t *testing.T) {
+// Exit 130 is a claim that a signal killed the process, so a caller who
+// canceled their own context must not get it. They get the operational code
+// for a canceled operation instead (DP-023).
+//
+// This distinction cannot be drawn from the context alone — a canceled
+// context looks the same whichever way it ended — which is why signals are
+// watched separately.
+func TestProgrammaticCancellationIsNotReportedAsASignal(t *testing.T) {
 	t.Parallel()
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -649,12 +654,11 @@ func TestCancellationExitsInterrupted(t *testing.T) {
 			"--to", "oci-layout://" + filepath.Join(t.TempDir(), "layout")},
 		cli.Streams{Out: &out, Err: &errOut})
 
-	if code != fault.ExitSuccess && code != fault.ExitInterrupted {
-		t.Errorf("exit = %d, want %d (interrupted) or %d (completed first)",
-			code, fault.ExitInterrupted, fault.ExitSuccess)
+	if code == fault.ExitInterrupted {
+		t.Error("a caller-canceled context was reported as death by SIGINT")
 	}
-	if code == fault.ExitInterrupted && out.Len() != 0 {
-		t.Errorf("an interrupted run wrote a result to stdout: %q", out.String())
+	if code != fault.ExitSuccess && out.Len() != 0 {
+		t.Errorf("a failed run wrote a result to stdout: %q", out.String())
 	}
 }
 

@@ -30,11 +30,11 @@ import (
 
 	"github.com/urfave/cli/v3"
 
-	"github.com/thingzio/devproof"
-	"github.com/thingzio/devproof/bundle"
-	"github.com/thingzio/devproof/evidence"
 	"github.com/thingzio/devproof/internal/fault"
 	"github.com/thingzio/devproof/internal/version"
+	"github.com/thingzio/devproof/pkg/bundle"
+	"github.com/thingzio/devproof/pkg/devproof"
+	"github.com/thingzio/devproof/pkg/evidence"
 )
 
 // envPrefix namespaces every environment variable.
@@ -70,8 +70,19 @@ func Run(ctx context.Context, args []string, streams Streams) int {
 		config:  &Config{},
 	}
 
-	ctx, stop := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
-	defer stop()
+	// Signals are watched through their own channel rather than through
+	// signal.NotifyContext, because the exit code has to distinguish why the
+	// context ended. NotifyContext only reports that it is done, so a caller
+	// who canceled their own context would have been reported as killed by
+	// SIGINT — exit 130 — when nobody pressed anything. Exit 130 is a claim
+	// about a signal, so it is only made when a signal actually arrived
+	// (DP-023).
+	signals := make(chan os.Signal, 1)
+	signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM)
+	defer signal.Stop(signals)
+
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 
 	// The watcher exits with the run, so a long-lived process embedding this
 	// does not accumulate one goroutine per invocation.
@@ -79,8 +90,9 @@ func Run(ctx context.Context, args []string, streams Streams) int {
 	defer close(watching)
 	go func() {
 		select {
-		case <-ctx.Done():
+		case <-signals:
 			app.interrupted.Store(true)
+			cancel()
 		case <-watching:
 		}
 	}()
