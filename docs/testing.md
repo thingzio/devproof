@@ -189,19 +189,30 @@ destination appears after failure.
 
 ## Fuzzing
 
-Continuous fuzz targets include:
+These fuzz targets exist:
 
-- portable path normalization and collision keys;
-- selection-pattern parsing and matching;
-- manifest, lock, policy, config, and evidence decoding;
-- tree-record encoding and decoding;
-- tar and gzip verification;
-- OCI reference parsing;
-- digest parsing; and
-- credential redaction.
+| Target | Package | What it asserts |
+| --- | --- | --- |
+| `FuzzExtractLayer` | `internal/safefs` | never panics on arbitrary layer bytes, and a failed extraction leaves no destination and no staging directory |
+| `FuzzParseReference` | `pkg/artifact` | never panics, never yields both a tag and a digest, and is deterministic |
+| `FuzzParseDigest` | `pkg/bundle` | an accepted digest round-trips to exactly one lowercase spelling |
+| `FuzzFoldStringIsDeterministic` | `internal/canonical` | case folding is deterministic |
+| `FuzzCanonicalizeJSONIsIdempotent` | `internal/canonical` | RFC 8785 canonicalization is idempotent |
 
-Fuzzers use strict memory, file, and time limits. Any crash, panic, hang, escape,
-or nondeterministic result becomes a permanent regression corpus entry.
+`FuzzExtractLayer` is the one that matters most. Extraction is the only place
+DevProof processes bytes it did not produce and has not yet proven anything
+about: a registry can serve whatever it likes, and the layer reaches the tar
+reader before any of it is trusted. A panic there is a denial of service in
+anything embedding the SDK, where no process boundary absorbs it.
+
+Not yet covered, and listed here rather than implied: selection-pattern
+matching, manifest and lock decoding, policy decoding, tree-record decoding,
+and credential redaction. Decoding is strict and rejects unknown fields, so the
+decoders are lower risk than the extractor, but that is an argument about
+priority rather than a substitute for a target.
+
+Any crash, panic, hang, escape, or nondeterministic result becomes a permanent
+regression corpus entry under `testdata/fuzz/`.
 
 ## OCI transport tests
 

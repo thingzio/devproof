@@ -1,0 +1,56 @@
+name: keyless
+
+# Keyless signing is the default way DevProof signs, and the only thing in the
+# project that cannot be tested in-process: it needs a live Fulcio, a live
+# Rekor, and an OIDC token that only a real workload identity can mint.
+#
+# Weekly rather than per-push, and manually before a release. Every run writes
+# a permanent public entry to the Sigstore transparency log, and signing a
+# throwaway fixture on every commit would be noise in a shared public-good
+# service for no extra signal.
+on:
+  schedule:
+    # Mondays, early UTC. Failure means Sigstore changed under us or our
+    # ambient-identity detection broke, and either is worth a week's notice
+    # rather than discovering it during a release.
+    - cron: '17 6 * * 1'
+  workflow_dispatch:
+
+# Never on pull_request. A fork cannot be allowed to mint this repository's
+# workload identity, and scoping the trigger is a stronger guarantee than
+# relying on the default that fork pull requests get no elevated permissions.
+permissions:
+  contents: read
+
+concurrency:
+  group: keyless-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  keyless:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      # The only elevated permission, and the whole point: it mints a
+      # short-lived OIDC token scoped to an audience. There is no long-lived
+      # secret anywhere in this workflow, which is the property being tested —
+      # if this needed a secret, keyless signing would not be working.
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        with:
+          go-version-file: .go-version
+          check-latest: true
+
+      - name: sign and verify against a live Sigstore
+        env:
+          DEVPROOF_KEYLESS_E2E: '1'
+          # The identity the test requires the signature to carry. Verifying
+          # without naming it would pass for a signature from anyone, which is
+          # exactly what keyless signing exists to prevent.
+          DEVPROOF_KEYLESS_ISSUER: https://token.actions.githubusercontent.com
+          DEVPROOF_KEYLESS_IDENTITY: >-
+            https://github.com/${{ github.repository }}/.github/workflows/keyless.yaml@${{ github.ref }}
+        run: go test ./pkg/devproof/ -run Keyless -v -count=1

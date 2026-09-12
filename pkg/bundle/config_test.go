@@ -226,3 +226,40 @@ func TestDigestRoundTrip(t *testing.T) {
 		t.Errorf("Hex() is %d characters, want 64", len(d.Hex()))
 	}
 }
+
+// A digest is a security boundary: every blob is trusted because its bytes
+// hash to a value a descriptor named. Parsing must reject anything it cannot
+// represent exactly, and must never accept two spellings of one digest —
+// otherwise a lookup keyed on the string form misses content it holds.
+func FuzzParseDigest(f *testing.F) {
+	for _, seed := range []string{
+		"", "sha256:", "sha256:" + strings.Repeat("a", 64),
+		"sha256:" + strings.Repeat("A", 64),
+		"sha512:" + strings.Repeat("a", 128),
+		"sha256:" + strings.Repeat("a", 63),
+		"sha256:" + strings.Repeat("a", 65),
+		"sha256:" + strings.Repeat("g", 64),
+		"SHA256:" + strings.Repeat("a", 64),
+		"\x00", "sha256:\x00",
+	} {
+		f.Add(seed)
+	}
+
+	f.Fuzz(func(t *testing.T, raw string) {
+		digest, err := ParseDigest(raw)
+		if err != nil {
+			return
+		}
+		round := digest.String()
+		again, againErr := ParseDigest(round)
+		if againErr != nil {
+			t.Fatalf("ParseDigest(%q) produced %q, which does not parse: %v", raw, round, againErr)
+		}
+		if again != digest {
+			t.Fatalf("ParseDigest(%q) does not round-trip: %q", raw, round)
+		}
+		if round != strings.ToLower(round) {
+			t.Fatalf("ParseDigest(%q) produced a non-lowercase digest %q", raw, round)
+		}
+	})
+}

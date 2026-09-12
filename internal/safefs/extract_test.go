@@ -467,3 +467,76 @@ func stdContext(t *testing.T) (context.Context, context.CancelFunc) {
 	t.Helper()
 	return context.WithCancel(t.Context())
 }
+
+// Extraction is the one place DevProof processes bytes it did not produce and
+// has not yet proven anything about. A registry can serve whatever it likes,
+// and the layer reaches the tar reader before any of it is trusted.
+//
+// The invariants are absolute and do not depend on the input being sensible:
+// never panic, and on failure leave no destination. A partial directory that
+// looks finished is worse than no directory, because the caller proceeds.
+// validSeedLayer builds a well-formed layer so coverage-guided fuzzing has a
+// working archive to mutate rather than only malformed ones. Built with the
+// standard library rather than the helpers above, which need a *testing.T that
+// seeding does not have.
+func validSeedLayer() []byte {
+	var buf bytes.Buffer
+	gz := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gz)
+	body := "hello\n"
+	_ = tw.WriteHeader(&tar.Header{
+		Name: "a.txt", Mode: 0o644, Size: int64(len(body)), Typeflag: tar.TypeReg,
+	})
+	_, _ = io.WriteString(tw, body)
+	_ = tw.Close()
+	_ = gz.Close()
+	return buf.Bytes()
+}
+
+func FuzzExtractLayer(f *testing.F) {
+	cfg := configFor(map[string]string{"a.txt": "hello\n"})
+
+	// Seeds: a valid layer, then the shapes that historically break archive
+	// readers.
+	f.Add(validSeedLayer())
+	f.Add([]byte{})
+	f.Add([]byte{0x1f, 0x8b})                         // gzip magic, nothing after
+	f.Add([]byte{0x1f, 0x8b, 0x08, 0, 0, 0, 0, 0, 0}) // header, truncated body
+	f.Add(bytes.Repeat([]byte{0}, 1024))              // zeros: tar's terminator
+	f.Add([]byte("not an archive at all"))
+
+	f.Fuzz(func(t *testing.T, layer []byte) {
+		dest := filepath.Join(t.TempDir(), "out")
+
+		// A panic here is the finding. Extract is reached with attacker-chosen
+		// bytes, so a panic is a denial of service in anything embedding the
+		// SDK, where there is no process boundary to absorb it.
+		_, err := Extract(t.Context(), bytes.NewReader(layer), ExtractOptions{
+			Destination: dest,
+			Config:      cfg,
+			Limits:      bundle.DefaultLimits(),
+		})
+		if err == nil {
+			// Accepting arbitrary bytes is legitimate only when they really
+			// are the layer this config describes.
+			return
+		}
+
+		// DP-008: a failed expansion publishes nothing.
+		if _, statErr := os.Stat(dest); !os.IsNotExist(statErr) {
+			t.Fatalf("extraction failed but left a destination behind: %v", err)
+		}
+		// Staging must not survive either, or a long-running process
+		// accumulates directories nobody will ever look at.
+		parent := filepath.Dir(dest)
+		entries, readErr := os.ReadDir(parent)
+		if readErr != nil {
+			return
+		}
+		for _, entry := range entries {
+			if strings.HasPrefix(entry.Name(), ".devproof-staging-") {
+				t.Fatalf("extraction failed and left staging %q behind", entry.Name())
+			}
+		}
+	})
+}
