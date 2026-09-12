@@ -71,6 +71,7 @@ func NewKeyAttester(key crypto.Signer) (*KeyAttester, error) {
 	return &KeyAttester{signer: key, keyID: keyID}, nil
 }
 
+// Name identifies the attester in evidence and in verification reports.
 func (a *KeyAttester) Name() string { return "devproof.thingz.io/key/v1" }
 
 // KeyID returns this attester's public key identifier.
@@ -138,6 +139,8 @@ func NewKeyVerifier(keys ...crypto.PublicKey) (*KeyVerifier, error) {
 	return v, nil
 }
 
+// Name identifies the verifier in verification reports. It matches the
+// attester it verifies, so a report says which scheme accepted the evidence.
 func (v *KeyVerifier) Name() string { return "devproof.thingz.io/key/v1" }
 
 // Verify checks an envelope's signatures against the trusted keys.

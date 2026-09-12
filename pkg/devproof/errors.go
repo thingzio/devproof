@@ -32,6 +32,20 @@ import (
 //	if errors.As(err, &dperr) {
 //	    log.Printf("source %q failed at %q", dperr.Source, dperr.Path)
 //	}
+//
+// The fields are listed here because this is an alias, and godoc renders an
+// alias without the underlying type's fields:
+//
+//	Code      Code   // classifies the failure; the errors.Is target
+//	Op        string // the operation, such as "build" or "source.resolve"
+//	Source    string // the logical source involved, when one is
+//	Path      string // the canonical bundle-relative path, never a host path
+//	Msg       string // what failed and what to do; NOT a stable API
+//	Temporary bool   // advisory only: a retry may succeed
+//	Err       error  // the wrapped cause, if any
+//
+// Branch on Code, never on Msg. Code is the stable contract; Msg is written
+// for the human deciding what to do next and will be reworded.
 type Error = fault.Error
 
 // Code classifies a failure. It is also a valid [errors.Is] target.

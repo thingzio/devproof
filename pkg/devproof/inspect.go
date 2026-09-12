@@ -55,9 +55,13 @@ const (
 type InspectKind string
 
 const (
-	InspectKindBundle   InspectKind = "bundle"
+	// InspectKindBundle is a published subject, read from a registry or a
+	// local layout.
+	InspectKindBundle InspectKind = "bundle"
+	// InspectKindManifest is a bundle manifest on disk: authored intent.
 	InspectKindManifest InspectKind = "manifest"
-	InspectKindLock     InspectKind = "lock"
+	// InspectKindLock is a lock file on disk: resolved material.
+	InspectKindLock InspectKind = "lock"
 )
 
 // InspectRequest asks for metadata without expanding anything.

@@ -100,6 +100,7 @@ type CredentialProvider interface {
 // CredentialFunc adapts a function to [CredentialProvider].
 type CredentialFunc func(ctx context.Context, registry string) (Credential, error)
 
+// Credential implements [CredentialProvider].
 func (f CredentialFunc) Credential(ctx context.Context, registry string) (Credential, error) {
 	return f(ctx, registry)
 }

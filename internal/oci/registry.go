@@ -137,6 +137,7 @@ func NewRegistry(opts RegistryOptions) *Registry {
 	return r
 }
 
+// Scheme is the reference scheme this transport handles.
 func (r *Registry) Scheme() string { return artifact.SchemeRegistry }
 
 // repository returns a cached client for a reference's repository.

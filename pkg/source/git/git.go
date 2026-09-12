@@ -77,7 +77,11 @@ var _ source.Resolver = (*Resolver)(nil)
 // New returns a Git resolver that clones over HTTPS.
 func New() *Resolver { return &Resolver{open: cloneOverHTTPS} }
 
-func (r *Resolver) Type() string              { return bundle.SourceTypeGit }
+// Type is the manifest source type this resolver handles.
+func (r *Resolver) Type() string { return bundle.SourceTypeGit }
+
+// Identity describes the resolver in provenance, so evidence records which
+// implementation produced a resolution rather than only what it resolved to.
 func (r *Resolver) Identity() source.Identity { return identity }
 
 // Resolve fetches the repository and snapshots the resolved commit.

@@ -54,6 +54,7 @@ func NewLayoutTransport() *LayoutTransport {
 	return &LayoutTransport{layouts: make(map[string]*Layout)}
 }
 
+// Scheme is the reference scheme this transport handles.
 func (t *LayoutTransport) Scheme() string { return artifact.SchemeLayout }
 
 // layout opens the layout a reference names, creating it when create is set.

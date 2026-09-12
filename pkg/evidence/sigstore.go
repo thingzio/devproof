@@ -95,6 +95,7 @@ func NewSigstoreAttester(opts SigstoreOptions) *SigstoreAttester {
 	return &SigstoreAttester{opts: opts}
 }
 
+// Name identifies the attester in evidence and in verification reports.
 func (a *SigstoreAttester) Name() string { return "devproof.thingz.io/sigstore/v1" }
 
 // Attest signs the payload and returns the signature plus its certificate.
@@ -227,6 +228,8 @@ func NewSigstoreVerifier(opts SigstoreOptions) *SigstoreVerifier {
 	return &SigstoreVerifier{opts: opts}
 }
 
+// Name identifies the verifier in verification reports. It matches the
+// attester it verifies, so a report says which scheme accepted the evidence.
 func (v *SigstoreVerifier) Name() string { return "devproof.thingz.io/sigstore/v1" }
 
 // trustedMaterial resolves the trust root once.

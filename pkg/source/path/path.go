@@ -66,7 +66,11 @@ var _ source.Resolver = (*Resolver)(nil)
 // New returns a path resolver.
 func New() *Resolver { return &Resolver{} }
 
-func (r *Resolver) Type() string              { return bundle.SourceTypePath }
+// Type is the manifest source type this resolver handles.
+func (r *Resolver) Type() string { return bundle.SourceTypePath }
+
+// Identity describes the resolver in provenance, so evidence records which
+// implementation produced a resolution rather than only what it resolved to.
 func (r *Resolver) Identity() source.Identity { return identity }
 
 // Resolve snapshots the configured directory.

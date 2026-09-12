@@ -49,7 +49,11 @@ func (s Status) String() string { return string(s) }
 type Severity string
 
 const (
-	SeverityError   Severity = "error"
+	// SeverityError means the policy was not satisfied. One is enough to
+	// fail a report.
+	SeverityError Severity = "error"
+	// SeverityWarning is worth reporting but does not fail verification, such
+	// as evidence that was ignored because nothing required it.
 	SeverityWarning Severity = "warning"
 )
 
