@@ -1,0 +1,78 @@
+#!/usr/bin/env python3
+"""Apply the Apache-2.0 header to first-party Go files.
+
+Skips anything that already carries a copyright notice, which covers the
+vendored DEFLATE encoder: those files are Go Authors code under a BSD license
+(DP-016), and stamping a Thingz Apache header on them would be a false
+copyright claim on someone else's work.
+
+The header goes above everything, separated by a blank line, so that a
+//go:build constraint is still recognized and a package doc comment still sits
+immediately before its package clause.
+"""
+
+from __future__ import annotations
+
+import pathlib
+import sys
+
+HEADER = """\
+// Copyright 2026 Thingz LLC
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
+// SPDX-License-Identifier: Apache-2.0
+"""
+
+SKIP_DIRS = {".git", "bin", "dist", "testdata"}
+
+
+def has_notice(text: str) -> bool:
+    # Only the top of the file counts. A "copyright" in a string literal or a
+    # test fixture further down is not a file header.
+    head = text.split("package ", 1)[0]
+    return "Copyright" in head or "SPDX-License-Identifier" in head
+
+
+def main() -> int:
+    root = pathlib.Path(__file__).resolve().parent.parent
+    check = "--check" in sys.argv
+
+    changed: list[str] = []
+    for path in sorted(root.rglob("*.go")):
+        if any(part in SKIP_DIRS for part in path.relative_to(root).parts):
+            continue
+        text = path.read_text(encoding="utf-8")
+        if has_notice(text):
+            continue
+        changed.append(str(path.relative_to(root)))
+        if not check:
+            path.write_text(HEADER + "\n" + text, encoding="utf-8")
+
+    if check:
+        for name in changed:
+            print(f"missing license header: {name}")
+        if changed:
+            print(f"\n{len(changed)} file(s) missing a license header; run `make license`")
+            return 1
+        print("every Go file carries a license header")
+        return 0
+
+    for name in changed:
+        print(f"added header: {name}")
+    print(f"\n{len(changed)} file(s) updated")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
