@@ -43,12 +43,35 @@ jobs:
   # The determinism matrix from docs/testing.md. Byte-identical output across
   # every cell is the claim DevProof makes, so it is tested on every push
   # rather than saved for release day.
+  #
+  # Each cell runs the golden-vector tests, which assert exact bytes against
+  # committed fixtures. That is what makes this a determinism matrix rather
+  # than four independent test runs: identical fixture bytes on every
+  # architecture is the claim, and a per-cell failure localizes which cell
+  # broke it.
+  #
+  # The runner label and the platform it represents are both named, because
+  # the mapping is not obvious — macos-latest is arm64, not amd64 — and a
+  # label that silently changes architecture would quietly drop a cell.
   test:
+    name: test (${{ matrix.platform }})
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        include:
+          - {os: ubuntu-latest, platform: linux/amd64}
+          - {os: ubuntu-24.04-arm, platform: linux/arm64}
+          # macos-13 is the Intel runner. If GitHub ever repoints this label
+          # at Apple silicon, the architecture assertion below fails loudly
+          # rather than silently leaving darwin/amd64 untested.
+          - {os: macos-13, platform: darwin/amd64}
+          - {os: macos-latest, platform: darwin/arm64}
+          # Windows is supported but not a release requirement, so it reports
+          # without gating: a Windows-only failure must not block work on the
+          # platforms that ship (DP-035).
+          - {os: windows-latest, platform: windows/amd64, optional: true}
     runs-on: ${{ matrix.os }}
+    continue-on-error: ${{ matrix.optional || false }}
     steps:
       # Line endings are pinned by .gitattributes (`* -text`), so a Windows
       # checkout does not rewrite the fixtures whose digests the tests assert.
@@ -57,6 +80,16 @@ jobs:
         with:
           go-version-file: .go-version
           check-latest: true
+      - name: architecture matches the cell
+        # A runner label that changed architecture underneath us would turn a
+        # missing cell into a passing one, which is the failure this matrix
+        # exists to prevent.
+        if: runner.os != 'Windows'
+        run: |
+          want="$(echo '${{ matrix.platform }}' | cut -d/ -f2)"
+          got="$(go env GOARCH)"
+          echo "want ${want}, got ${got}"
+          test "${want}" = "${got}"
       - name: test
         if: runner.os != 'Windows'
         run: make cover
@@ -149,3 +182,16 @@ jobs:
           go-version-file: .go-version
           check-latest: true
       - run: make build
+      # Every release target must at least compile, including the ones no
+      # cell in the test matrix runs on. Cross-compiling here is cheap and
+      # catches a platform-specific build tag that the matrix would only
+      # find at release time.
+      - name: every release target compiles
+        run: |
+          set -euo pipefail
+          for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 \
+                        windows/amd64 windows/arm64; do
+            echo "building ${target}"
+            GOOS="${target%%/*}" GOARCH="${target##*/}" go build ./...
+            GOOS="${target%%/*}" GOARCH="${target##*/}" go vet ./...
+          done

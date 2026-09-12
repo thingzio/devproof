@@ -600,10 +600,26 @@ would not, because being obviously correct matters more here than being fast,
 and a second implementation clever enough to be wrong in the same way as the
 first has no value.
 
-## DP-035: Windows ships, with one stated limitation
+## DP-035: Linux and macOS are the supported matrix; Windows is best-effort
 
-The first release includes `windows/amd64` and `windows/arm64`, and Windows
-joins the determinism matrix.
+The supported platforms are Linux and macOS on both amd64 and arm64. All four
+cells run the full suite in CI and all four gate a merge and a release, which
+is what makes "byte-identical across the matrix" a result rather than a claim.
+Each cell runs the golden-vector tests, so identical fixture bytes on every
+architecture is asserted per cell and a failure localizes which one broke it.
+
+Naming the runner label alone was not enough: `macos-latest` is arm64 and
+`ubuntu-latest` is amd64, so a matrix listing only those two silently covered
+half the cells while reading as though it covered all of them. Each cell now
+declares the platform it represents and asserts `go env GOARCH` against it, so
+a label that changes architecture fails loudly instead of quietly dropping
+coverage.
+
+Windows binaries are built for amd64 and arm64 and the code supports it, but
+Windows is not a release requirement. Its CI cell reports without gating: a
+Windows-only failure must not block work on the platforms that ship. Every
+release target is cross-compiled and vetted on every push regardless, so a
+platform-specific build tag breaks at push time rather than at release time.
 
 The deferral existed for two reasons. One was a real blocker and is fixed; the
 other turned out to be narrower than it looked.

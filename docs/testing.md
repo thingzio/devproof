@@ -43,15 +43,24 @@ change adds a new format-version fixture rather than updating v1 expectations.
 
 ## Determinism matrix
 
-The same vectors run on every supported combination of:
+The same vectors run on every supported platform, and every cell gates:
 
-- Linux and macOS initially;
-- amd64 and arm64 where runners are available;
-- the minimum and current supported Go versions; and
-- filesystems with different native enumeration orders and timestamp precision.
+| Cell | Runner |
+| --- | --- |
+| `linux/amd64` | `ubuntu-latest` |
+| `linux/arm64` | `ubuntu-24.04-arm` |
+| `darwin/amd64` | `macos-13` |
+| `darwin/arm64` | `macos-latest` |
 
-Windows joins the supported matrix only after executable-mode and atomic
-directory-publication behavior satisfy the v1 contract.
+Each cell declares the platform it represents and asserts `go env GOARCH`
+against it. A runner label alone is not self-describing — `macos-latest` is
+arm64 — so a matrix that named only labels could silently cover half the cells
+while reading as though it covered all of them.
+
+`windows/amd64` also runs, but reports without gating: Windows is supported
+best-effort and is not a release requirement (DP-035). Every release target is
+additionally cross-compiled and vetted on every push, so a platform-specific
+build tag fails at push time rather than at release time.
 
 Tests build each fixture at least twice with varied:
 

@@ -145,11 +145,13 @@ devproof verify oci://<ref>:signed --key signer.pub.pem --policy policy.yaml
 
 ## Platforms
 
-| Platform | Build (Git source) | Build (path source) | Verify | Expand |
-| --- | --- | --- | --- | --- |
-| Linux amd64/arm64 | yes | yes | yes | yes |
-| macOS amd64/arm64 | yes | yes | yes | yes |
-| Windows amd64/arm64 | yes | modes normalize to `0644` | yes | yes |
+| Platform | Support | Build (Git) | Build (path) | Verify | Expand |
+| --- | --- | --- | --- | --- | --- |
+| Linux amd64 | gating | yes | yes | yes | yes |
+| Linux arm64 | gating | yes | yes | yes | yes |
+| macOS amd64 | gating | yes | yes | yes | yes |
+| macOS arm64 | gating | yes | yes | yes | yes |
+| Windows amd64/arm64 | best-effort | yes | modes become `0644` | yes | yes |
 
 Windows cannot observe the execute bit, so a path source there records every
 regular file as `0644`. A tree containing POSIX-executable files therefore

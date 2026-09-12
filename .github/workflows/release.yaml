@@ -11,12 +11,19 @@ permissions:
   contents: read
 
 jobs:
+  # Every platform a release ships binaries for, so a tag is never cut from
+  # a commit that was only ever tested on half the matrix.
   verify:
+    name: verify (${{ matrix.platform }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: true
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        include:
+          - {os: ubuntu-latest, platform: linux/amd64}
+          - {os: ubuntu-24.04-arm, platform: linux/arm64}
+          - {os: macos-13, platform: darwin/amd64}
+          - {os: macos-latest, platform: darwin/arm64}
     steps:
       - uses: actions/checkout@v5
         with:

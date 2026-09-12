@@ -155,8 +155,13 @@ be accepted for the remainder of the major version.
 
 ## Supported platforms
 
-Linux, macOS, and Windows on amd64 and arm64. Byte identity across the matrix
-is verified on every push, not at release time.
+Supported: Linux and macOS, on amd64 and arm64. All four cells run the full
+suite on every push and all four gate a release, so byte identity across the
+matrix is a result rather than a claim.
+
+Best-effort: Windows on amd64 and arm64. Binaries are built and the code
+supports it, but its CI cell reports without gating and it is not a release
+requirement.
 
 Windows carries one stated limitation, and only one. Building from a **local
 directory** on Windows records every regular file as `0644`, because Windows
