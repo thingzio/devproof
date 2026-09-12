@@ -447,6 +447,13 @@ separately is one most people will use unsigned. The cost is dependency
 weight; the benefit is that `--sign` works with nothing configured on a CI
 runner that already has an OIDC token.
 
+"Works with nothing configured" was not true when it was written. Ambient
+detection only read SIGSTORE_ID_TOKEN, and GitHub Actions does not set it — it
+provides a URL and a request token that must be exchanged for an identity token
+at a specific audience. So the one CI system this claim was made about was the
+one where it failed, and the post-merge keyless job is what found it. The
+exchange is implemented now, and the claim is true.
+
 The local-key attester stays for air-gapped builds, tests, and callers who
 already manage keys, and because it is the implementation that proves the
 interface is not shaped around one provider.

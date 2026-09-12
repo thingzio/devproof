@@ -18,8 +18,11 @@ package evidence
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/thingzio/devproof/pkg/fault"
 )
@@ -155,5 +158,96 @@ func TestSigstoreAttesterAndVerifierAgreeOnName(t *testing.T) {
 	verifier := NewSigstoreVerifier(SigstoreOptions{})
 	if attester.Name() != verifier.Name() {
 		t.Errorf("attester %q and verifier %q disagree", attester.Name(), verifier.Name())
+	}
+}
+
+// Ambient detection that only reads environment variables finds nothing on
+// GitHub Actions, which is the one CI system where keyless signing is most
+// expected to work without configuration. These cover the exchange without a
+// live Actions runner.
+func TestGitHubActionsTokenAbsentIsNotAnError(t *testing.T) {
+	t.Setenv("ACTIONS_ID_TOKEN_REQUEST_URL", "")
+	t.Setenv("ACTIONS_ID_TOKEN_REQUEST_TOKEN", "")
+
+	token, err := githubActionsToken(context.Background(), 0)
+	if err != nil {
+		t.Fatalf("absence reported as an error: %v", err)
+	}
+	if token != "" {
+		t.Errorf("got a token with no request variables set: %q", token)
+	}
+}
+
+func TestGitHubActionsTokenExchange(t *testing.T) {
+	var gotAudience, gotAuth string
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAudience = r.URL.Query().Get("audience")
+		gotAuth = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"value":"the.id.token"}`))
+	}))
+	defer server.Close()
+
+	t.Setenv("ACTIONS_ID_TOKEN_REQUEST_URL", server.URL)
+	t.Setenv("ACTIONS_ID_TOKEN_REQUEST_TOKEN", "request-token")
+
+	// The test server uses a self-signed certificate, so the exchange runs
+	// through a client that trusts it.
+	original := http.DefaultTransport
+	http.DefaultTransport = server.Client().Transport
+	defer func() { http.DefaultTransport = original }()
+
+	token, err := githubActionsToken(context.Background(), 5*time.Second)
+	if err != nil {
+		t.Fatalf("exchange: %v", err)
+	}
+	if token != "the.id.token" {
+		t.Errorf("token = %q", token)
+	}
+	// Fulcio rejects a token minted for a different audience, so requesting
+	// the wrong one fails later and confusingly.
+	if gotAudience != "sigstore" {
+		t.Errorf("audience = %q, want sigstore", gotAudience)
+	}
+	if gotAuth != "Bearer request-token" {
+		t.Errorf("request token was not presented as a bearer credential: %q", gotAuth)
+	}
+}
+
+// A refusal must say what to do about it. Missing `id-token: write` is the
+// overwhelmingly common cause and is invisible from the error otherwise.
+func TestGitHubActionsTokenRefusalIsActionable(t *testing.T) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{"message":"denied"}`))
+	}))
+	defer server.Close()
+
+	t.Setenv("ACTIONS_ID_TOKEN_REQUEST_URL", server.URL)
+	t.Setenv("ACTIONS_ID_TOKEN_REQUEST_TOKEN", "request-token")
+	original := http.DefaultTransport
+	http.DefaultTransport = server.Client().Transport
+	defer func() { http.DefaultTransport = original }()
+
+	_, err := githubActionsToken(context.Background(), 5*time.Second)
+	if err == nil {
+		t.Fatal("a refused exchange succeeded")
+	}
+	if !strings.Contains(err.Error(), "id-token: write") {
+		t.Errorf("the error does not name the likely cause: %v", err)
+	}
+	if fault.CodeOf(err) != fault.CodeAuthentication {
+		t.Errorf("code = %q, want %q", fault.CodeOf(err), fault.CodeAuthentication)
+	}
+}
+
+// The request token is a bearer credential scoped to one host. A plaintext URL
+// from a modified environment must not put it on the wire.
+func TestGitHubActionsTokenRequiresHTTPS(t *testing.T) {
+	t.Setenv("ACTIONS_ID_TOKEN_REQUEST_URL", "http://127.0.0.1:1/token")
+	t.Setenv("ACTIONS_ID_TOKEN_REQUEST_TOKEN", "request-token")
+
+	if _, err := githubActionsToken(context.Background(), time.Second); err == nil {
+		t.Fatal("a plaintext identity-token URL was accepted")
 	}
 }

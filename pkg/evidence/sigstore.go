@@ -20,6 +20,10 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"sync"
@@ -207,9 +211,129 @@ func (a *SigstoreAttester) identityToken(ctx context.Context) (string, error) {
 	if token := os.Getenv("SIGSTORE_ID_TOKEN"); token != "" {
 		return token, nil
 	}
+
+	// GitHub Actions is the reason keyless signing is the default, so it is
+	// the one ambient identity worth detecting without being asked.
+	token, err := githubActionsToken(ctx, a.opts.Timeout)
+	if err != nil {
+		return "", err
+	}
+	if token != "" {
+		return token, nil
+	}
+
 	return "", fault.New(fault.CodeAuthentication, sigstoreOp,
-		"keyless signing needs an OIDC identity token; supply one, configure a token "+
-			"provider, or set SIGSTORE_ID_TOKEN")
+		"keyless signing needs an OIDC identity token. On GitHub Actions, grant the "+
+			"job `permissions: id-token: write`. Elsewhere, supply one, configure a "+
+			"token provider, or set SIGSTORE_ID_TOKEN")
+}
+
+// sigstoreAudience is the audience Fulcio expects an identity token to carry.
+const sigstoreAudience = "sigstore"
+
+// githubActionsTokenTimeout bounds the exchange when no timeout is configured.
+const githubActionsTokenTimeout = 30 * time.Second
+
+// githubActionsToken exchanges a workflow's request token for an OIDC identity
+// token, returning an empty string when this is not GitHub Actions.
+//
+// Actions does not put an identity token in the environment. It provides a URL
+// and a request token, and the identity token has to be fetched from that URL
+// for a specific audience — so "ambient detection" that only reads environment
+// variables finds nothing on the one CI system where keyless signing is most
+// expected to work.
+//
+// An empty return means "not here", not "failed": a developer running this on
+// a laptop has none of these variables, and that is not an error worth
+// reporting differently from any other missing identity. A request that is
+// attempted and fails is an error, because the variables being present means
+// someone meant for this to work.
+func githubActionsToken(ctx context.Context, timeout time.Duration) (string, error) {
+	requestURL := os.Getenv("ACTIONS_ID_TOKEN_REQUEST_URL")
+	requestToken := os.Getenv("ACTIONS_ID_TOKEN_REQUEST_TOKEN")
+	if requestURL == "" || requestToken == "" {
+		return "", nil
+	}
+
+	parsed, err := url.Parse(requestURL)
+	if err != nil {
+		return "", fault.Wrap(fault.CodeAuthentication, sigstoreOp,
+			"the GitHub Actions identity-token URL is malformed", err)
+	}
+	// The URL arrives from the environment. Requiring HTTPS means a modified
+	// environment cannot send the request token over the wire in the clear.
+	if parsed.Scheme != "https" {
+		return "", fault.New(fault.CodeAuthentication, sigstoreOp,
+			"the GitHub Actions identity-token URL is not https")
+	}
+	query := parsed.Query()
+	query.Set("audience", sigstoreAudience)
+	parsed.RawQuery = query.Encode()
+
+	if timeout <= 0 {
+		timeout = githubActionsTokenTimeout
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	// gosec flags the URL as tainted, and in general it would be: a request
+	// built from an environment variable is a classic SSRF. It is not an
+	// escalation here. The URL and the bearer credential come from the same
+	// environment, so anything able to redirect this request already holds
+	// the token it would be stealing and is already executing inside the
+	// build. HTTPS is required above and redirects are refused below, which
+	// is what actually protects the credential.
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, parsed.String(), nil) //nolint:gosec // see above
+	if err != nil {
+		return "", fault.Wrap(fault.CodeAuthentication, sigstoreOp,
+			"building the GitHub Actions identity-token request", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+requestToken)
+	req.Header.Set("Accept", "application/json")
+
+	client := &http.Client{
+		// The request token is a bearer credential for one host. Refusing
+		// redirects keeps it there rather than trusting the standard
+		// library's cross-host stripping to be the only thing between a
+		// redirect and a leaked credential (DP-013).
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+	resp, err := client.Do(req) //nolint:gosec // see the note on the request above
+	if err != nil {
+		return "", fault.Wrap(fault.CodeAuthentication, sigstoreOp,
+			"requesting the GitHub Actions identity token", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		// The response body can echo the request; the status alone says
+		// enough and cannot carry a credential.
+		return "", fault.New(fault.CodeAuthentication, sigstoreOp,
+			fmt.Sprintf("GitHub Actions refused the identity-token request: HTTP %d. "+
+				"Does the job grant `permissions: id-token: write`?", resp.StatusCode))
+	}
+
+	// Bounded: a JWT is small, and an unbounded read here would be an
+	// unbounded allocation driven by a remote response.
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return "", fault.Wrap(fault.CodeAuthentication, sigstoreOp,
+			"reading the GitHub Actions identity token", err)
+	}
+	var payload struct {
+		Value string `json:"value"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return "", fault.Wrap(fault.CodeAuthentication, sigstoreOp,
+			"decoding the GitHub Actions identity token", err)
+	}
+	if payload.Value == "" {
+		return "", fault.New(fault.CodeAuthentication, sigstoreOp,
+			"GitHub Actions returned an empty identity token")
+	}
+	return payload.Value, nil
 }
 
 // SigstoreVerifier verifies Sigstore bundles.
