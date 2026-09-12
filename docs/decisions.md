@@ -382,15 +382,82 @@ internal costs nothing: no v1 operation requires validator execution.
 Consequence: the interface may be promoted in a later minor release without a
 format change. It may not be narrowed once exported.
 
+## DP-027: One referrer carries one signed statement
+
+Signatures and provenance are one referrer, not two. A referrer is a DSSE
+envelope containing an in-toto Statement, stored with these media types:
+
+```text
+artifact type: application/vnd.thingz.devproof.evidence.v1
+blob:          application/vnd.dev.sigstore.bundle.v1+json
+```
+
+Splitting them would mean a signature object that names a provenance object
+that names the subject, and a consumer would have to decide what an
+unsigned-but-present provenance means, or a signature whose statement is
+missing. One object with one subject binding has one answer: it verifies or it
+does not.
+
+The artifact type identifies DevProof evidence so that referrer discovery can
+filter before fetching. The blob media type is the Sigstore bundle type so
+that generic Sigstore tooling can read what DevProof writes.
+
+## DP-028: Referrer-tag fallback is explicit and reported
+
+Where a registry has no referrers API, evidence is stored under a tag derived
+from the subject digest:
+
+```text
+sha256-<hex>.evidence
+```
+
+That is one tag for one subject, so two evidence objects for the same subject
+under a fallback registry overwrite each other rather than accumulating. A
+registry without the referrers API cannot express a set, and pretending
+otherwise — by appending an index, say — would make "which evidence exists"
+depend on a read-modify-write race that has no locking.
+
+The consequence is reported rather than hidden. A verification result records
+which storage mode was used, and a policy may refuse the fallback entirely.
+An operation that needs to attach a second evidence object to a subject on a
+fallback registry fails rather than silently replacing the first.
+
+## DP-029: Keyless signing works out of the box
+
+`evidence.Attester` and `evidence.Verifier` are interfaces, and the module
+ships two implementations of each: Sigstore keyless, and a local ECDSA or
+Ed25519 key.
+
+Keyless is included rather than left to an embedding application even though
+it brings a large dependency tree — TUF, Rekor, Fulcio, protobuf. The
+alternative was an SDK where the default signing story required a caller to
+assemble it themselves, and a supply-chain tool whose batteries are sold
+separately is one most people will use unsigned. The cost is dependency
+weight; the benefit is that `--sign` works with nothing configured on a CI
+runner that already has an OIDC token.
+
+The local-key attester stays for air-gapped builds, tests, and callers who
+already manage keys, and because it is the implementation that proves the
+interface is not shaped around one provider.
+
+Trust material comes from the Sigstore TUF root by default, refreshed and
+cached, or from a caller-supplied trusted root for offline verification.
+Neither path lets an artifact influence the trust material used to judge it.
+
+Policy is written against a verified identity — either a key identifier or an
+OIDC issuer and subject — so the same rules apply whichever attester produced
+the evidence.
+
+Consequence: a caller who signs with a local key still pays for the Sigstore
+dependency tree at build time. That is the trade, taken deliberately. If it
+becomes a problem, the split is a separate module, not a change to these
+interfaces.
+
 ## Open decisions
 
 The following remain unresolved and are needed by the phase noted:
 
-1. Exact Sigstore referrer media types, and whether signatures and provenance
-   use one referrer or two. Needed by phase 4.
-2. Referrer-tag fallback behavior for registries without the OCI referrers API,
-   including concurrency and copy semantics. Needed by phase 4.
-3. Whether the first CLI release ships Windows binaries. The format is designed
+1. Whether the first CLI release ships Windows binaries. The format is designed
    to be producible and consumable on Windows, and the portable profile exists
    for that reason, but the determinism matrix does not include Windows until
    executable-mode and atomic directory publication are proven there. Needed by

@@ -1,8 +1,10 @@
 package oci
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
+	"encoding/json"
 	stderrors "errors"
 	"fmt"
 	"io"
@@ -41,7 +43,10 @@ type Registry struct {
 	repos map[string]*remote.Repository
 }
 
-var _ artifact.Transport = (*Registry)(nil)
+var (
+	_ artifact.Transport         = (*Registry)(nil)
+	_ artifact.ReferrerTransport = (*Registry)(nil)
+)
 
 // RegistryOptions configures a registry transport.
 type RegistryOptions struct {
@@ -358,3 +363,120 @@ func statusCodeOf(err error) int {
 
 func isUnauthorized(err error) bool { return statusCodeOf(err) == http.StatusUnauthorized }
 func isForbidden(err error) bool    { return statusCodeOf(err) == http.StatusForbidden }
+
+// Referrers lists evidence attached to a subject.
+//
+// Where the registry has no referrers API, the fallback tag is consulted
+// instead and the storage mode says so. A caller that cannot accept the
+// fallback's replace-rather-than-accumulate semantics can refuse it by
+// policy, but only if it is told which mode answered (DP-028).
+func (r *Registry) Referrers(
+	ctx context.Context,
+	ref artifact.Reference,
+	subject artifact.Descriptor,
+	artifactType string,
+) ([]artifact.Descriptor, artifact.EvidenceStorage, error) {
+
+	repo, err := r.repository(ref)
+	if err != nil {
+		return nil, "", err
+	}
+	descriptor, err := toOCIDescriptor(subject)
+	if err != nil {
+		return nil, "", err
+	}
+
+	var found []artifact.Descriptor
+	err = repo.Referrers(ctx, descriptor, artifactType, func(page []ocispec.Descriptor) error {
+		for _, item := range page {
+			found = append(found, fromOCIDescriptor(item))
+			if int64(len(found)) > maxReferrers {
+				return fault.New(fault.CodeLimitExceeded, registryOp,
+					fmt.Sprintf("subject has more than %d referrers", maxReferrers))
+			}
+		}
+		return nil
+	})
+	if err == nil {
+		return found, artifact.StorageReferrers, nil
+	}
+	if !stderrors.Is(err, errdef.ErrUnsupported) {
+		return nil, "", classifyRegistryError(err, "listing referrers")
+	}
+
+	// No referrers API. Fall back to the tag scheme.
+	subjectDigest, err := subject.ParsedDigest()
+	if err != nil {
+		return nil, "", err
+	}
+	fallback := ref
+	fallback.Tag = artifact.FallbackTag(subjectDigest)
+	fallback.Digest = ""
+
+	resolved, err := r.Resolve(ctx, fallback)
+	if err != nil {
+		if stderrors.Is(err, fault.CodeInvalidArtifact) {
+			// No evidence under the fallback tag is an empty set, not a
+			// failure: a subject with no evidence is an ordinary state.
+			return nil, artifact.StorageTagFallback, nil
+		}
+		return nil, "", err
+	}
+	return []artifact.Descriptor{resolved}, artifact.StorageTagFallback, nil
+}
+
+// maxReferrers bounds referrer enumeration. A repository is an open
+// attachment surface, so the listing is somebody else's input.
+const maxReferrers = 4096
+
+// Attach stores an evidence blob and the referrer manifest naming it.
+func (r *Registry) Attach(
+	ctx context.Context,
+	ref artifact.Reference,
+	subject artifact.Descriptor,
+	blob artifact.Descriptor,
+	content io.Reader,
+	artifactType string,
+) (artifact.Descriptor, artifact.EvidenceStorage, error) {
+
+	// The blob first, then the empty config, then the manifest that names
+	// them: the same ordering rule publication follows, for the same reason.
+	if pushErr := r.Push(ctx, ref, blob, content); pushErr != nil {
+		return artifact.Descriptor{}, "", pushErr
+	}
+	if pushErr := r.Push(ctx, ref, artifact.EmptyDescriptor(),
+		bytes.NewReader(artifact.EmptyJSONContent)); pushErr != nil {
+		return artifact.Descriptor{}, "", pushErr
+	}
+
+	manifest := artifact.NewReferrerManifest(subject, blob, artifactType)
+	encoded, err := json.Marshal(manifest)
+	if err != nil {
+		return artifact.Descriptor{}, "", fault.Wrap(fault.CodeInternal, registryOp,
+			"encoding the referrer manifest", err)
+	}
+	manifestDescriptor := artifact.DescriptorFor(artifact.MediaTypeImageManifest, encoded)
+
+	if pushErr := r.Push(ctx, ref, manifestDescriptor, bytes.NewReader(encoded)); pushErr != nil {
+		return artifact.Descriptor{}, "", pushErr
+	}
+
+	// Whether the registry understood the subject field decides the storage
+	// mode. Asking afterwards rather than probing first means one round trip
+	// rather than two, and the answer is the one that actually applies.
+	_, storage, err := r.Referrers(ctx, ref, subject, artifactType)
+	if err != nil {
+		return manifestDescriptor, "", err
+	}
+	if storage == artifact.StorageTagFallback {
+		subjectDigest, digestErr := subject.ParsedDigest()
+		if digestErr != nil {
+			return manifestDescriptor, "", digestErr
+		}
+		if tagErr := r.Tag(ctx, ref, manifestDescriptor,
+			artifact.FallbackTag(subjectDigest)); tagErr != nil {
+			return manifestDescriptor, "", tagErr
+		}
+	}
+	return manifestDescriptor, storage, nil
+}

@@ -4,9 +4,11 @@ import (
 	"context"
 	stderrors "errors"
 	"log/slog"
+	"time"
 
 	"github.com/thingzio/devproof/artifact"
 	"github.com/thingzio/devproof/bundle"
+	"github.com/thingzio/devproof/evidence"
 	"github.com/thingzio/devproof/internal/fault"
 	"github.com/thingzio/devproof/internal/oci"
 	"github.com/thingzio/devproof/source"
@@ -29,6 +31,10 @@ type Client struct {
 	logger     *slog.Logger
 	resolvers  map[string]source.Resolver
 	transports map[string]artifact.Transport
+	attester   evidence.Attester
+	verifier   evidence.Verifier
+	trustRoots [][]byte
+	clock      func() time.Time
 	closed     bool
 }
 
@@ -157,6 +163,76 @@ func WithInsecureRegistry(provider artifact.CredentialProvider) Option {
 	}
 }
 
+// WithSigstore enables keyless signing and verification.
+//
+// This is the default posture for a build that asks to sign: an ephemeral key
+// certified by Fulcio against an OIDC identity, recorded in a transparency
+// log, with nothing durable to protect or rotate. On a CI runner that already
+// has an OIDC token it needs no configuration at all.
+func WithSigstore(opts evidence.SigstoreOptions) Option {
+	return func(c *Client) error {
+		c.attester = evidence.NewSigstoreAttester(opts)
+		c.verifier = evidence.NewSigstoreVerifier(opts)
+		return nil
+	}
+}
+
+// WithAttester registers the implementation that signs evidence.
+func WithAttester(attester evidence.Attester) Option {
+	return func(c *Client) error {
+		if attester == nil {
+			return fault.New(fault.CodeInvalidInput, clientOp, "attester must not be nil")
+		}
+		c.attester = attester
+		return nil
+	}
+}
+
+// WithVerifier registers the implementation that checks evidence signatures.
+//
+// Verification and signing are configured separately on purpose: a consumer
+// verifies without ever signing, and making one imply the other would mean
+// every verifier carried a signing path it never uses.
+func WithVerifier(verifier evidence.Verifier) Option {
+	return func(c *Client) error {
+		if verifier == nil {
+			return fault.New(fault.CodeInvalidInput, clientOp, "verifier must not be nil")
+		}
+		c.verifier = verifier
+		return nil
+	}
+}
+
+// WithTrustRoots supplies trust material for evidence verification.
+//
+// Supplying roots is what makes offline verification possible: nothing is
+// fetched, and the material came from somewhere the caller chose rather than
+// from the network at verification time.
+func WithTrustRoots(roots ...[]byte) Option {
+	return func(c *Client) error {
+		if len(roots) == 0 {
+			return fault.New(fault.CodeInvalidInput, clientOp, "no trust roots supplied")
+		}
+		c.trustRoots = append(c.trustRoots, roots...)
+		return nil
+	}
+}
+
+// WithClock supplies the time a verification evaluates against.
+//
+// The clock is used for evidence and diagnostics only. Canonical artifact
+// encoding has no clock dependency at all, which is why a bundle built at two
+// different moments has one identity (DP-012).
+func WithClock(clock func() time.Time) Option {
+	return func(c *Client) error {
+		if clock == nil {
+			return fault.New(fault.CodeInvalidInput, clientOp, "clock must not be nil")
+		}
+		c.clock = clock
+		return nil
+	}
+}
+
 // WithTempRoot sets the parent directory for snapshot and layout scratch
 // space.
 //
@@ -216,6 +292,31 @@ func (c *Client) effectiveLimits(request Limits) bundle.Resolved {
 		bundle.Input{Origin: bundle.OriginClient, Limits: c.limits},
 		bundle.Input{Origin: bundle.OriginRequest, Limits: request},
 	)
+}
+
+// effectiveLimitsWithPolicy adds a policy's limits to the intersection.
+//
+// A policy may tighten a bound and never relax one, which is what stops a
+// policy — which can travel with an artifact — being usable as privilege
+// escalation against the embedding application's own configuration (DP-021).
+func (c *Client) effectiveLimitsWithPolicy(request, fromPolicy Limits) bundle.Resolved {
+	return bundle.Resolve(
+		bundle.Input{Origin: bundle.OriginClient, Limits: c.limits},
+		bundle.Input{Origin: bundle.OriginRequest, Limits: request},
+		bundle.Input{Origin: bundle.OriginPolicy, Limits: fromPolicy},
+	)
+}
+
+// now returns the evaluation time.
+//
+// Injected so that a time-dependent policy rule can be tested without waiting
+// for the clock, and so that one evaluation uses exactly one time rather than
+// reading the clock at each rule.
+func (c *Client) now() time.Time {
+	if c.clock != nil {
+		return c.clock()
+	}
+	return time.Now()
 }
 
 // discardHandler is a no-op slog handler. The zero-configuration Client

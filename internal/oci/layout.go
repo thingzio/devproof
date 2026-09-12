@@ -64,6 +64,9 @@ type IndexItem struct {
 	Size         int64             `json:"size"`
 	ArtifactType string            `json:"artifactType,omitempty"`
 	Annotations  map[string]string `json:"annotations,omitempty"`
+	// Subject names the manifest this one is a referrer for. A layout has no
+	// referrers API, so the index is where that relationship is recorded.
+	Subject string `json:"subject,omitempty"`
 }
 
 // Descriptor returns the item as a plain descriptor.
@@ -476,4 +479,48 @@ func (l *Layout) readFile(name string, limit int64) (_ []byte, retErr error) {
 			fmt.Sprintf("file exceeds the limit of %d bytes", limit)).WithPath(name)
 	}
 	return content, nil
+}
+
+// AddReferrer records an evidence manifest against its subject.
+//
+// Unlike AddManifest this never carries a tag and never replaces an existing
+// entry with a different digest: a subject may have several pieces of
+// evidence, and attaching one must not remove another (DP-003).
+func (l *Layout) AddReferrer(descriptor artifact.Descriptor, artifactType, subjectDigest string) error {
+	if err := descriptor.Validate(); err != nil {
+		return err
+	}
+	if subjectDigest == "" {
+		return fault.New(fault.CodeInvalidArtifact, layoutOp, "a referrer must name a subject")
+	}
+	digest, err := descriptor.ParsedDigest()
+	if err != nil {
+		return err
+	}
+	if _, statErr := l.root.Stat(blobPath(digest)); statErr != nil {
+		return fault.Wrap(fault.CodeInvalidArtifact, layoutOp,
+			"cannot reference a manifest that is not in the layout", statErr).
+			WithPath(descriptor.Digest)
+	}
+
+	index, err := l.Index()
+	if err != nil {
+		return err
+	}
+	for _, existing := range index.Manifests {
+		if existing.Digest == descriptor.Digest && existing.Subject == subjectDigest {
+			// Already recorded. Content-addressed, so this is the same
+			// evidence, and re-attaching it is a no-op rather than an error.
+			return nil
+		}
+	}
+
+	index.Manifests = append(index.Manifests, IndexItem{
+		MediaType:    descriptor.MediaType,
+		Digest:       descriptor.Digest,
+		Size:         descriptor.Size,
+		ArtifactType: artifactType,
+		Subject:      subjectDigest,
+	})
+	return l.SetIndex(index.Manifests)
 }

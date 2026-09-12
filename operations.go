@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/thingzio/devproof/artifact"
 	"github.com/thingzio/devproof/bundle"
@@ -55,6 +56,11 @@ type BuildRequest struct {
 	// Tag optionally names the subject at the destination. It is assigned
 	// last, after the published manifest has been read back and compared.
 	Tag string
+
+	// Attest signs provenance and attaches it to the published subject.
+	// Requires an attester; see WithSigstore or WithAttester.
+	Attest bool
+
 	// Limits tightens the client's bounds for this operation.
 	Limits Limits
 }
@@ -85,6 +91,9 @@ type BuildResult struct {
 	// LockBytes is its canonical encoding, for a caller that wants to
 	// persist it.
 	LockBytes []byte
+	// Evidence describes the provenance attached, when signing was asked
+	// for. Attaching it never changed the subject digest above (DP-003).
+	Evidence *EvidenceResult
 }
 
 // Build packages one or more sources into an OCI image layout.
@@ -192,6 +201,20 @@ func (c *Client) Build(ctx context.Context, req BuildRequest) (_ *BuildResult, r
 		return nil, err
 	}
 
+	// Evidence is attached after the subject is published and verified.
+	// Signing first would mean attesting to something that might never land;
+	// attaching after is also what makes the failure mode benign — a
+	// published subject with no evidence is a subject a policy will refuse,
+	// not a subject nobody can find.
+	var attached *EvidenceResult
+	if req.Attest {
+		attached, err = c.attachEvidence(ctx, transport, destination, subject,
+			buildPredicate(resolved, subject, lock), spec.Metadata.Name)
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	c.logger.InfoContext(ctx, "built bundle",
 		"subject", subject.ManifestDigest.String(),
 		"sources", len(spec.Spec.Sources),
@@ -213,6 +236,7 @@ func (c *Client) Build(ctx context.Context, req BuildRequest) (_ *BuildResult, r
 		Tag:            tag,
 		Lock:           lock,
 		LockBytes:      lockBytes,
+		Evidence:       attached,
 	}, nil
 }
 
@@ -482,41 +506,160 @@ type VerifyRequest struct {
 	Reference string
 	// RequireDigest rejects a tag before any content is fetched.
 	RequireDigest bool
+
+	// Policy is the verification policy to apply. Without one, trust reports
+	// not-evaluated rather than pass.
+	Policy *policy.Document
+	// PolicyPath loads a policy from a file. Mutually exclusive with Policy.
+	PolicyPath string
+
 	// Limits tightens the client's bounds for this operation.
 	Limits Limits
 }
 
-// Verify checks a subject's integrity.
+// Verify checks a subject's integrity and, when a policy is supplied, its
+// trust.
 //
-// Trust and semantics report not-evaluated in Phase 1: no policy evaluator
-// and no validator exist yet. They are reported rather than omitted, because
-// a caller needs to be able to see that they were not assessed (DP-010).
+// Integrity is always evaluated and has no flag that disables it. Trust is
+// evaluated only when a policy is given, and its absence reports
+// not-evaluated rather than pass — a consumer whose trust configuration never
+// took effect has no other way to notice (DP-010).
 func (c *Client) Verify(ctx context.Context, req VerifyRequest) (*policy.Report, error) {
 	if err := c.checkOpen(); err != nil {
 		return nil, err
 	}
-	subject, _, err := c.loadSubject(ctx, req)
+
+	doc, havePolicy, err := c.loadPolicy(req)
+	if err != nil {
+		return nil, err
+	}
+	if havePolicy && doc.Spec.Subject.RequireDigestReference {
+		req.RequireDigest = true
+	}
+
+	subject, pinned, err := c.loadSubject(ctx, req)
 	if err != nil {
 		return nil, err
 	}
 
-	report := &policy.Report{
-		Integrity:     policy.StatusPass,
-		Trust:         policy.StatusNotEvaluated,
-		Semantics:     policy.StatusNotEvaluated,
-		SubjectDigest: subject.ManifestDigest.String(),
-		TreeDigest:    subject.TreeDigest.String(),
-		Format:        subject.Config.Format.String(),
-		FileCount:     subject.Config.FileCount,
-		TotalBytes:    subject.Config.TotalSize,
+	if !havePolicy {
+		report := &policy.Report{
+			Integrity:     policy.StatusPass,
+			Trust:         policy.StatusNotEvaluated,
+			Semantics:     policy.StatusNotEvaluated,
+			SubjectDigest: subject.ManifestDigest.String(),
+			TreeDigest:    subject.TreeDigest.String(),
+			Format:        subject.Config.Format.String(),
+			FileCount:     subject.Config.FileCount,
+			TotalBytes:    subject.Config.TotalSize,
+		}
+		report.AddFinding(policy.Finding{
+			Code:     policy.FindingPolicyNotSupplied,
+			Severity: policy.SeverityWarning,
+			Message: "no verification policy was supplied, so trust was not evaluated; " +
+				"integrity alone does not establish that this artifact came from anyone in particular",
+		})
+		return report, nil
 	}
-	report.AddFinding(policy.Finding{
-		Code:     policy.FindingPolicyNotSupplied,
-		Severity: policy.SeverityWarning,
-		Message: "no verification policy was supplied, so trust was not evaluated; " +
-			"integrity alone does not establish that this artifact came from anyone in particular",
-	})
+
+	return c.evaluatePolicy(ctx, doc, subject, pinned, req)
+}
+
+// loadPolicy resolves which policy a request supplies.
+//
+// found distinguishes "no policy was asked for" — which is legitimate and
+// reports trust as not-evaluated — from "a policy was asked for and could not
+// be loaded", which is a failure.
+func (c *Client) loadPolicy(req VerifyRequest) (_ *policy.Document, found bool, _ error) {
+	switch {
+	case req.Policy != nil && req.PolicyPath != "":
+		return nil, false, fault.New(fault.CodeInvalidInput, "verify",
+			"a policy and a policy path are mutually exclusive")
+	case req.Policy != nil:
+		return req.Policy, true, req.Policy.Validate()
+	case req.PolicyPath != "":
+		data, err := os.ReadFile(req.PolicyPath) //nolint:gosec // caller-supplied policy path
+		if err != nil {
+			return nil, false, fault.Wrap(fault.CodeInvalidInput, "verify", "reading the policy", err)
+		}
+		doc, err := policy.ParseDocument(data)
+		return doc, err == nil, err
+	default:
+		return nil, false, nil
+	}
+}
+
+// evaluatePolicy discovers evidence, verifies it, and applies the policy.
+func (c *Client) evaluatePolicy(
+	ctx context.Context,
+	doc *policy.Document,
+	subject *canonical.Subject,
+	pinned artifact.Reference,
+	req VerifyRequest,
+) (*policy.Report, error) {
+
+	transport, err := c.transportFor(pinned)
+	if err != nil {
+		return nil, err
+	}
+
+	// Policy limits intersect with the client's and the request's; a policy
+	// may tighten a bound and never relax one (DP-021).
+	limits := c.effectiveLimitsWithPolicy(req.Limits, doc.Spec.Limits)
+
+	verified, rejected, storage, err := c.discoverEvidence(ctx, transport, pinned, subject, limits.Limits)
+	if err != nil {
+		return nil, err
+	}
+
+	// One time for every time-dependent rule, captured here and recorded in
+	// the result, so two rules in one evaluation cannot disagree about now.
+	evaluatedAt := c.now()
+
+	input := policy.Input{
+		SubjectDigest:           subject.ManifestDigest.String(),
+		Format:                  subject.Config.Format,
+		SuppliedDigestReference: referenceWasDigest(req.Reference),
+		FileCount:               subject.Config.FileCount,
+		TotalBytes:              subject.Config.TotalSize,
+		EvaluatedAt:             evaluatedAt,
+	}
+	for _, item := range verified {
+		input.Evidence = append(input.Evidence, policy.VerifiedEvidence{
+			Digest:                  item.digest,
+			Statement:               item.statement,
+			Identities:              item.identities,
+			TransparencyLogVerified: item.logVerified,
+			IntegratedTime:          item.integratedTime,
+			ViaTagFallback:          item.viaTagFallback,
+		})
+	}
+	for _, item := range rejected {
+		input.Rejected = append(input.Rejected, policy.RejectedEvidence{
+			Digest:              item.digest,
+			Reason:              item.reason,
+			MatchedRequiredType: item.matchedRequiredType,
+		})
+	}
+
+	report := policy.Evaluate(doc, input)
+	report.TreeDigest = subject.TreeDigest.String()
+	report.PolicyName = doc.Metadata.Name
+	report.EvaluatedAt = evaluatedAt.UTC().Format(time.RFC3339)
+	report.EvidenceStorage = storage
+	if digest, _, err := canonical.JSONDigest(doc); err == nil {
+		report.PolicyDigest = digest.String()
+	}
+	for _, item := range rejected {
+		report.RejectedEvidence = append(report.RejectedEvidence, item.digest+": "+item.reason)
+	}
 	return report, nil
+}
+
+// referenceWasDigest reports whether the caller named a digest.
+func referenceWasDigest(raw string) bool {
+	ref, err := artifact.ParseReference(raw)
+	return err == nil && ref.IsDigest()
 }
 
 // ExpandRequest describes an expansion.

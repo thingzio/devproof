@@ -1,7 +1,9 @@
 package oci
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	stderrors "errors"
 	"fmt"
 	"io"
@@ -26,7 +28,10 @@ type LayoutTransport struct {
 	layouts map[string]*Layout
 }
 
-var _ artifact.Transport = (*LayoutTransport)(nil)
+var (
+	_ artifact.Transport         = (*LayoutTransport)(nil)
+	_ artifact.ReferrerTransport = (*LayoutTransport)(nil)
+)
 
 // NewLayoutTransport returns a transport for local layouts.
 func NewLayoutTransport() *LayoutTransport {
@@ -170,4 +175,78 @@ func (t *LayoutTransport) Close() error {
 	}
 	t.layouts = make(map[string]*Layout)
 	return stderrors.Join(errs...)
+}
+
+// Referrers lists evidence attached to a subject in a layout.
+//
+// A layout has no referrers API, so the index is scanned for manifests whose
+// subject is the one asked about. That is a real set, unlike the registry
+// fallback tag, so the storage mode reported is the referrers one.
+func (t *LayoutTransport) Referrers(
+	_ context.Context,
+	ref artifact.Reference,
+	subject artifact.Descriptor,
+	artifactType string,
+) ([]artifact.Descriptor, artifact.EvidenceStorage, error) {
+
+	layout, err := t.layout(ref, false)
+	if err != nil {
+		return nil, "", err
+	}
+	index, err := layout.Index()
+	if err != nil {
+		return nil, "", err
+	}
+
+	var found []artifact.Descriptor
+	for _, item := range index.Manifests {
+		if item.Subject == "" || item.Subject != subject.Digest {
+			continue
+		}
+		if artifactType != "" && item.ArtifactType != artifactType {
+			continue
+		}
+		found = append(found, item.Descriptor())
+	}
+	return found, artifact.StorageReferrers, nil
+}
+
+// Attach stores an evidence blob and the referrer manifest naming it.
+func (t *LayoutTransport) Attach(
+	ctx context.Context,
+	ref artifact.Reference,
+	subject artifact.Descriptor,
+	blob artifact.Descriptor,
+	content io.Reader,
+	artifactType string,
+) (artifact.Descriptor, artifact.EvidenceStorage, error) {
+
+	layout, err := t.layout(ref, true)
+	if err != nil {
+		return artifact.Descriptor{}, "", err
+	}
+
+	if pushErr := t.Push(ctx, ref, blob, content); pushErr != nil {
+		return artifact.Descriptor{}, "", pushErr
+	}
+	if pushErr := t.Push(ctx, ref, artifact.EmptyDescriptor(),
+		bytes.NewReader(artifact.EmptyJSONContent)); pushErr != nil {
+		return artifact.Descriptor{}, "", pushErr
+	}
+
+	manifest := artifact.NewReferrerManifest(subject, blob, artifactType)
+	encoded, err := json.Marshal(manifest)
+	if err != nil {
+		return artifact.Descriptor{}, "", fault.Wrap(fault.CodeInternal, layoutTransportOp,
+			"encoding the referrer manifest", err)
+	}
+	manifestDescriptor := artifact.DescriptorFor(artifact.MediaTypeImageManifest, encoded)
+
+	if err := t.Push(ctx, ref, manifestDescriptor, bytes.NewReader(encoded)); err != nil {
+		return artifact.Descriptor{}, "", err
+	}
+	if err := layout.AddReferrer(manifestDescriptor, artifactType, subject.Digest); err != nil {
+		return artifact.Descriptor{}, "", err
+	}
+	return manifestDescriptor, artifact.StorageReferrers, nil
 }

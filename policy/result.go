@@ -56,8 +56,10 @@ func (f Finding) String() string {
 	return fmt.Sprintf("[%s] %s: %s (%s)", f.Severity, f.Code, f.Message, f.Subject)
 }
 
-// Stable finding codes. The set grows as policy evaluation lands; these are
-// the ones integrity verification can produce.
+// Stable finding codes.
+//
+// Codes are a compatibility surface; messages are not. A caller branches on
+// these, and a message may be reworded at any time.
 const (
 	FindingIntegrityFailed   = "integrity-failed"
 	FindingDigestMismatch    = "digest-mismatch"
@@ -65,6 +67,23 @@ const (
 	FindingFormatNotAllowed  = "format-not-allowed"
 	FindingResourceLimit     = "resource-limit-exceeded"
 	FindingPolicyNotSupplied = "policy-not-supplied"
+
+	FindingDigestReferenceRequired = "digest-reference-required"
+	FindingSignatureThreshold      = "signature-threshold-not-met"
+	FindingSignerNotAllowed        = "signer-identity-not-allowed"
+	FindingTransparencyProof       = "transparency-proof-required"
+	FindingProvenanceRequired      = "provenance-required"
+	FindingPredicateNotAllowed     = "predicate-not-allowed"
+	FindingBuilderNotAllowed       = "builder-not-allowed"
+	FindingLockDigestRequired      = "lock-digest-required"
+	FindingSourceTypeNotAllowed    = "source-type-not-allowed"
+	FindingSourceHostNotAllowed    = "source-host-not-allowed"
+	FindingImmutableResolution     = "immutable-resolution-required"
+	FindingSubjectMismatch         = "evidence-subject-mismatch"
+	FindingEvidenceExpired         = "evidence-expired"
+	FindingMatchingEvidenceInvalid = "matching-evidence-invalid"
+	FindingIgnoredEvidence         = "evidence-ignored"
+	FindingTagFallbackNotAllowed   = "evidence-tag-fallback-not-allowed"
 )
 
 // Report is the outcome of verifying one subject: the DevProof proof report.
@@ -93,6 +112,26 @@ type Report struct {
 
 	FileCount  int64 `json:"fileCount"`
 	TotalBytes int64 `json:"totalBytes"`
+
+	// AcceptedIdentities are the signers whose signatures verified and whose
+	// identities a policy rule accepted. A report records who was believed,
+	// not merely that somebody was.
+	AcceptedIdentities []string `json:"acceptedIdentities,omitempty"`
+	// PolicyDigest identifies the policy that was applied, so a result can
+	// be re-checked against the rules that produced it.
+	PolicyDigest string `json:"policyDigest,omitempty"`
+	// PolicyName is the policy's metadata name, for diagnostics.
+	PolicyName string `json:"policyName,omitempty"`
+	// EvaluatedAt is the single time every time-dependent rule used.
+	EvaluatedAt string `json:"evaluatedAt,omitempty"`
+	// EvidenceStorage reports how evidence was found: "referrers" or
+	// "tag-fallback". The fallback cannot express a set, so a consumer needs
+	// to know which mode produced the answer (DP-028).
+	EvidenceStorage string `json:"evidenceStorage,omitempty"`
+	// RejectedEvidence summarizes candidates that did not verify, kept
+	// separate from findings so "the policy was not satisfied" and "somebody
+	// attached junk" stay distinguishable.
+	RejectedEvidence []string `json:"rejectedEvidence,omitempty"`
 
 	Findings []Finding `json:"findings,omitempty"`
 }

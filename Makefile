@@ -133,9 +133,39 @@ vet: ## Run go vet
 
 ##@ Security
 
+# Vulnerabilities that are known, unfixable upstream, and accepted.
+#
+# Each entry needs an ID, why it cannot be fixed, and why it does not apply.
+# A permanently-red `make vuln` is worse than no scan at all, because it
+# trains everyone to ignore the one signal that matters. Reviewing this list
+# is part of reviewing a dependency bump.
+#
+#   GO-2026-5932  golang.org/x/crypto/openpgp is unmaintained, with no fixed
+#                 version. It arrives through sigstore-go's signing package
+#                 and every reported trace is a package init; DevProof calls
+#                 no OpenPGP code and handles no OpenPGP material. It leaves
+#                 when sigstore-go drops the dependency.
+VULN_ALLOWLIST := GO-2026-5932
+
 .PHONY: vuln
 vuln: $(TOOLS_DIR)/govulncheck ## Scan for known vulnerabilities
-	govulncheck ./...
+	@echo "accepted, unfixable findings: $(VULN_ALLOWLIST)"
+	@report="$$(govulncheck ./... 2>&1 || true)"; \
+	  found="$$(printf '%s\n' "$$report" | sed -n 's/^Vulnerability #[0-9]*: \(GO-[0-9-]*\).*/\1/p' | sort -u)"; \
+	  unexpected=""; \
+	  for id in $$found; do \
+	    case " $(VULN_ALLOWLIST) " in *" $$id "*) ;; *) unexpected="$$unexpected $$id";; esac; \
+	  done; \
+	  if [ -n "$$unexpected" ]; then \
+	    printf '%s\n' "$$report"; \
+	    echo "unaccepted vulnerabilities:$$unexpected"; \
+	    exit 1; \
+	  fi; \
+	  if [ -n "$$found" ]; then \
+	    echo "only accepted findings present: $$(echo $$found)"; \
+	  else \
+	    echo "no vulnerabilities found"; \
+	  fi
 
 .PHONY: sbom
 sbom: $(TOOLS_DIR)/syft ## Generate a CycloneDX SBOM
