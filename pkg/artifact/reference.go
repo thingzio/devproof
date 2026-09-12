@@ -171,10 +171,9 @@ func splitLocator(raw string) (path, tag, digest string, err error) {
 	// folding the tag into the path.
 	//
 	// A colon only introduces a tag when nothing after it is a path
-	// separator. That rules out a registry port -- "registry:5000/repo" --
-	// and equally a Windows drive designator, where the path is
-	// "C:\Users\...". A tag cannot contain a separator under the OCI
-	// grammar, so anything that does is not one.
+	// separator. An OCI tag cannot contain a separator, so anything that does
+	// was never a tag. That rules out a registry port -- "registry:5000/repo"
+	// -- and any layout path whose directory names contain a colon.
 	if colon := strings.LastIndex(base, ":"); colon > lastPathSeparator(base) {
 		tag = base[colon+1:]
 		base = base[:colon]
@@ -184,10 +183,11 @@ func splitLocator(raw string) (path, tag, digest string, err error) {
 
 // lastPathSeparator returns the last index of either separator, or -1.
 //
-// Both are checked regardless of the host platform: a layout reference written
-// on Windows travels in manifests, locks, and scripts that are read on Linux,
-// and a parser whose answer depends on where it runs would make the same
-// string mean two different things.
+// Backslash counts too. It is a legal filename character on the platforms
+// DevProof supports, and it is the separator on the one it does not, so a
+// reference carrying one should parse the same way wherever it is read. A
+// parser whose answer depended on the host would make one string mean two
+// things.
 func lastPathSeparator(s string) int {
 	return max(strings.LastIndex(s, "/"), strings.LastIndex(s, `\`))
 }

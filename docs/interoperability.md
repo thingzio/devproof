@@ -145,18 +145,15 @@ devproof verify oci://<ref>:signed --key signer.pub.pem --policy policy.yaml
 
 ## Platforms
 
-| Platform | Support | Build (Git) | Build (path) | Verify | Expand |
-| --- | --- | --- | --- | --- | --- |
-| Linux amd64 | gating | yes | yes | yes | yes |
-| Linux arm64 | gating | yes | yes | yes | yes |
-| macOS amd64 | gating | yes | yes | yes | yes |
-| macOS arm64 | gating | yes | yes | yes | yes |
-| Windows amd64/arm64 | best-effort | yes | modes become `0644` | yes | yes |
+| Platform | Build | Verify | Expand |
+| --- | --- | --- | --- |
+| Linux amd64 | yes | yes | yes |
+| Linux arm64 | yes | yes | yes |
+| macOS amd64 | yes | yes | yes |
+| macOS arm64 | yes | yes | yes |
 
-Windows cannot observe the execute bit, so a path source there records every
-regular file as `0644`. A tree containing POSIX-executable files therefore
-yields a different subject digest on Windows; the CLI warns when this can
-apply. Git sources are unaffected — mode comes from the commit tree (DP-035).
+Every cell runs the full suite on every push and gates a release. Windows is
+not supported; use WSL (DP-035).
 
 ## Independent verification
 

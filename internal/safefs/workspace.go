@@ -118,6 +118,28 @@ func (w *Workspace) Path() string { return w.path }
 // Root returns the confined root for operations inside the workspace.
 func (w *Workspace) Root() *os.Root { return w.root }
 
+// ReleaseHandle closes the confined directory handle without giving up
+// ownership.
+//
+// Publication has to happen with no handle open on the staging directory:
+// Windows refuses to move a directory that anything still holds open, and the
+// expansion would fail at the last step with a sharing violation. Ownership is
+// kept, so a failure after this still removes the staging directory on Close —
+// which works from the path and does not need the handle.
+//
+// Safe to call more than once.
+func (w *Workspace) ReleaseHandle() error {
+	if w.root == nil {
+		return nil
+	}
+	err := w.root.Close()
+	w.root = nil
+	if err != nil {
+		return fault.Wrap(fault.CodeInternal, workspaceOp, "closing workspace root", err)
+	}
+	return nil
+}
+
 // Detach gives up ownership, returning the path without removing it.
 //
 // Expansion uses this after a successful publication: the staging directory

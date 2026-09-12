@@ -600,13 +600,11 @@ would not, because being obviously correct matters more here than being fast,
 and a second implementation clever enough to be wrong in the same way as the
 first has no value.
 
-## DP-035: Linux and macOS are the supported matrix; Windows is best-effort
+## DP-035: POSIX only; Windows is out of scope
 
-The supported platforms are Linux and macOS on both amd64 and arm64. All four
-cells run the full suite in CI and all four gate a merge and a release, which
-is what makes "byte-identical across the matrix" a result rather than a claim.
-Each cell runs the golden-vector tests, so identical fixture bytes on every
-architecture is asserted per cell and a failure localizes which one broke it.
+Supported platforms are Linux and macOS on amd64 and arm64. All four cells run
+the full suite and all four gate a merge and a release, which is what makes
+"byte-identical across the matrix" a result rather than a claim.
 
 Naming the runner label alone was not enough: `macos-latest` is arm64 and
 `ubuntu-latest` is amd64, so a matrix listing only those two silently covered
@@ -615,54 +613,29 @@ declares the platform it represents and asserts `go env GOARCH` against it, so
 a label that changes architecture fails loudly instead of quietly dropping
 coverage.
 
-Windows binaries are built for amd64 and arm64 and the code supports it, but
-Windows is not a release requirement. Its CI cell reports without gating: a
-Windows-only failure must not block work on the platforms that ship. Every
-release target is cross-compiled and vetted on every push regardless, so a
-platform-specific build tag breaks at push time rather than at release time.
+Windows is not supported, and `exclusiveRename` refuses to run there rather
+than falling back to something racy (DP-022).
 
-The deferral existed for two reasons. One was a real blocker and is fixed; the
-other turned out to be narrower than it looked.
+Windows support was built and then removed. It worked, and the cost was not the
+building — it was that every guarantee this project makes had to be re-proven
+against a filesystem with different rules, and each one had to be discovered
+through a CI round trip because it could not be run locally. Unlinking an open
+file, renaming a directory while a handle is open, POSIX permission bits,
+reserved device names: four separate mechanisms, each needing its own
+platform-specific branch and its own justification for why the weaker guarantee
+was acceptable.
 
-**Atomic directory publication.** `exclusiveRename` had no Windows
-implementation, so `Extract` refused outright — a Windows binary would have
-built and verified bundles but not expanded one. Windows does have the
-required primitive: `MoveFileExW` without `MOVEFILE_REPLACE_EXISTING` fails if
-the destination exists, and the test and the move are one operation inside the
-filesystem. That is precisely DP-022's requirement, and it works for
-directories. `os.Rename` could not be used because Go passes
-`MOVEFILE_REPLACE_EXISTING` to match POSIX, which is the behavior being
-avoided. `MOVEFILE_COPY_ALLOWED` is also left unset: a cross-volume move
-degrades into a non-atomic copy, and staging happens beside the destination
-so the move stays on one volume.
+For a tool whose value is that it behaves identically everywhere, carrying a
+platform where several guarantees are merely approximated is a poor trade.
+Windows users reach this through WSL, where every guarantee holds exactly as
+written, and that path needs no code at all.
 
-**Executable mode.** Windows reports no execute bit — `os.Stat` synthesizes
-0666, or 0444 when the read-only attribute is set — so a path source there
-normalizes every regular file to 0644. This does not affect reading, copying,
-verifying, or expanding a bundle from any platform, and it does not affect
-Git sources at all: mode comes from the commit tree, which records `100755`
-independently of the machine reading it (DP-011).
-
-It affects exactly one case: building from a *local directory* on Windows,
-where the tree contains files that would be executable on POSIX. Those files
-are recorded as 0644, so the subject digest differs from one built on Linux or
-macOS. The CLI warns when it builds from a path source on a platform that
-cannot observe the bit, and names the Git-source alternative.
-
-Warned rather than refused, because the common case — configuration with no
-executables — produces identical digests everywhere, and refusing it would
-withhold a working tool from the majority to protect a minority who are told
-about the problem anyway.
-
-Every other Windows hazard was already designed out by the portable profile
-(DP-005): reserved device names, trailing dots and spaces, non-portable
-characters, control characters, and case-folding collisions are all rejected
-at canonicalization, so a bundle that validates cannot fail to expand on
-Windows for a naming reason.
-
-`.gitattributes` pins `* -text` so a Windows checkout does not rewrite the
-fixtures whose digests the tests assert. That is a repository property rather
-than a CI setting, so it holds for a developer's working copy too.
+One thing from the attempt is kept: a colon only introduces a tag when nothing
+after it is a path separator, counting backslashes as separators. That was
+found because a Windows drive letter parsed as a tag, but the rule is correct
+independent of platform — a backslash is a legal filename character on Linux,
+and an OCI tag cannot contain a separator, so anything that does was never a
+tag.
 
 ## Open decisions
 

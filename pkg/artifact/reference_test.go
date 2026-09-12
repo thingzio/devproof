@@ -268,14 +268,14 @@ func TestReferenceLocator(t *testing.T) {
 	}
 }
 
-// A Windows absolute path carries a colon in its drive designator, and a
-// layout reference carries that path verbatim. Reading the drive colon as a
-// tag separator split "C:\dir\layout" into the repository "C" and the tag
-// "\dir\layout", so every build on Windows collided with its own --tag.
+// A colon in a path is not a tag separator unless a tag could actually follow
+// it. Comparing the colon only against the last forward slash split
+// "C:\dir\layout" into the repository "C" and the tag "\dir\layout",
+// because there was no forward slash to beat.
 //
-// Run on every platform on purpose: this is string parsing, and a layout
-// reference written on Windows is read on Linux.
-func TestWindowsDrivePathIsNotATag(t *testing.T) {
+// The registry-port cases are here to hold the fix honest: those must keep
+// parsing exactly as before.
+func TestColonIsOnlyATagWhenNoSeparatorFollows(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -283,9 +283,9 @@ func TestWindowsDrivePathIsNotATag(t *testing.T) {
 		raw  string
 		tag  string
 	}{
-		{"backslash drive path", `oci-layout://C:\Users\runner\Temp\layout`, ""},
-		{"forward slash drive path", "oci-layout://C:/Users/runner/Temp/layout", ""},
-		{"drive path with a tag", `oci-layout://C:\Temp\layout:v1`, "v1"},
+		{"colon then backslashes", `oci-layout://C:\Users\runner\Temp\layout`, ""},
+		{"colon then forward slashes", "oci-layout://C:/Users/runner/Temp/layout", ""},
+		{"colon in path, tag at the end", `oci-layout://C:\Temp\layout:v1`, "v1"},
 		{"relative path with a tag", "oci-layout://./layout:v1", "v1"},
 		{"relative path, no tag", "oci-layout://./layout", ""},
 		{"registry port is not a tag", "oci://registry.example.com:5000/team/config", ""},
@@ -307,8 +307,8 @@ func TestWindowsDrivePathIsNotATag(t *testing.T) {
 	}
 }
 
-// The drive letter must survive into the path, not be eaten as a repository.
-func TestWindowsDrivePathRoundTrips(t *testing.T) {
+// The whole path must survive, not be split at the first colon.
+func TestPathWithAColonRoundTrips(t *testing.T) {
 	t.Parallel()
 
 	const raw = `oci-layout://C:\Users\runner\Temp\layout`

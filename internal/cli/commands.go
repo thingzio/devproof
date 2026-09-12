@@ -122,8 +122,6 @@ func (a *App) buildCommand() *cli.Command {
 			}
 			defer func() { _ = client.Close() }()
 
-			a.warnUnobservableModes(cmd)
-
 			request := devproof.BuildRequest{
 				SpecPath:    cmd.String("file"),
 				SourcePath:  cmd.Args().First(),
@@ -402,29 +400,6 @@ func (a *App) inspectCommand() *cli.Command {
 			})
 		},
 	}
-}
-
-// warnUnobservableModes reports a platform that cannot see the execute bit.
-//
-// On Windows every regular file normalizes to 0644, because the filesystem
-// reports no execute bit to normalize. That is self-consistent — two Windows
-// builds of one tree agree — but a tree containing POSIX-executable files
-// produces a different digest here than it does on Linux or macOS, and a
-// digest that silently depends on the builder's operating system is the exact
-// failure this project exists to prevent.
-//
-// Warned rather than refused, because the common case is configuration with
-// no executables at all, where the digests match everywhere. Git sources are
-// unaffected and are not warned about: mode comes from the commit tree, which
-// records 100755 independently of the machine reading it.
-func (a *App) warnUnobservableModes(cmd *cli.Command) {
-	if executableBitObservable || cmd.Args().First() == "" {
-		return
-	}
-	a.printer.Warn("this platform cannot observe the execute bit, so every file is " +
-		"recorded as 0644; if this tree contains executables, the subject digest will " +
-		"differ from one built on Linux or macOS. Use a Git source for a " +
-		"platform-independent build")
 }
 
 // warnUnusedTrustMaterial reports trust material that cannot take effect.

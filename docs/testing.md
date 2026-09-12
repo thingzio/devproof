@@ -57,10 +57,9 @@ against it. A runner label alone is not self-describing — `macos-latest` is
 arm64 — so a matrix that named only labels could silently cover half the cells
 while reading as though it covered all of them.
 
-`windows/amd64` also runs, but reports without gating: Windows is supported
-best-effort and is not a release requirement (DP-035). Every release target is
-additionally cross-compiled and vetted on every push, so a platform-specific
-build tag fails at push time rather than at release time.
+Windows is not supported (DP-035). Every release target is additionally
+cross-compiled and vetted on every push, so a platform-specific build tag fails
+at push time rather than at release time.
 
 Tests build each fixture at least twice with varied:
 

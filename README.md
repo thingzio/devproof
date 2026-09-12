@@ -28,8 +28,8 @@ that name and check it against your own rules before anything touches disk.
 go install github.com/thingzio/devproof/cmd/devproof@latest
 ```
 
-Prebuilt binaries for Linux and macOS (amd64 and arm64) ship with each release.
-Those four are gated in CI on every push; Windows is built best-effort
+Prebuilt binaries for Linux and macOS (amd64 and arm64) ship with each release,
+and all four are gated in CI on every push. Windows is not supported — use WSL
 ([DP-035](docs/decisions.md)).
 
 ## Quickstart

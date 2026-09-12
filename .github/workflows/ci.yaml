@@ -81,15 +81,10 @@ jobs:
           # rather than silently leaving darwin/amd64 untested.
           - {os: macos-13, platform: darwin/amd64}
           - {os: macos-latest, platform: darwin/arm64}
-          # Windows is supported but not a release requirement, so it reports
-          # without gating: a Windows-only failure must not block work on the
-          # platforms that ship (DP-035).
-          - {os: windows-latest, platform: windows/amd64, optional: true}
     runs-on: ${{ matrix.os }}
-    continue-on-error: ${{ matrix.optional || false }}
     steps:
-      # Line endings are pinned by .gitattributes (`* -text`), so a Windows
-      # checkout does not rewrite the fixtures whose digests the tests assert.
+      # Line endings are pinned by .gitattributes (`* -text`), so no checkout
+      # rewrites the fixtures whose digests the tests assert.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
         with:
@@ -99,21 +94,13 @@ jobs:
         # A runner label that changed architecture underneath us would turn a
         # missing cell into a passing one, which is the failure this matrix
         # exists to prevent.
-        if: runner.os != 'Windows'
         run: |
           want="$(echo '${{ matrix.platform }}' | cut -d/ -f2)"
           got="$(go env GOARCH)"
           echo "want ${want}, got ${got}"
           test "${want}" = "${got}"
       - name: test
-        if: runner.os != 'Windows'
         run: make cover
-      - name: test
-        # make, sed, and the coverage plumbing are not dependable on a Windows
-        # runner, and this job is here to prove the code works on Windows, not
-        # to re-measure coverage.
-        if: runner.os == 'Windows'
-        run: go test ./...
       - name: upload coverage
         if: matrix.os == 'ubuntu-latest'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
@@ -205,8 +192,7 @@ jobs:
       - name: every release target compiles
         run: |
           set -euo pipefail
-          for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 \
-                        windows/amd64 windows/arm64; do
+          for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64; do
             echo "building ${target}"
             GOOS="${target%%/*}" GOARCH="${target##*/}" go build ./...
             GOOS="${target%%/*}" GOARCH="${target##*/}" go vet ./...

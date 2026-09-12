@@ -155,23 +155,12 @@ be accepted for the remainder of the major version.
 
 ## Supported platforms
 
-Supported: Linux and macOS, on amd64 and arm64. All four cells run the full
-suite on every push and all four gate a release, so byte identity across the
-matrix is a result rather than a claim.
+Linux and macOS, on amd64 and arm64. All four cells run the full suite on every
+push and all four gate a release, so byte identity across the matrix is a
+result rather than a claim.
 
-Best-effort: Windows on amd64 and arm64. Binaries are built and the code
-supports it, but its CI cell reports without gating and it is not a release
-requirement.
-
-Windows carries one stated limitation, and only one. Building from a **local
-directory** on Windows records every regular file as `0644`, because Windows
-reports no execute bit to normalize. A tree containing files that would be
-executable on POSIX therefore produces a different subject digest there.
-
-Nothing else is affected. Reading, verifying, copying, and expanding a bundle
-from any platform is unaffected, and so are Git sources, whose modes come from
-the commit tree rather than the filesystem. The CLI warns when it builds from
-a path source on a platform that cannot observe the bit. See DP-035.
+Windows is not supported. Use WSL, where every guarantee holds exactly as
+written. See DP-035 for why.
 
 ## Verifying these claims yourself
 

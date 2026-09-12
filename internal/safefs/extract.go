@@ -129,6 +129,14 @@ func Extract(ctx context.Context, layer io.Reader, opts ExtractOptions) (_ *Extr
 		return nil, err
 	}
 
+	// Every handle on the staging directory must be closed before it is
+	// moved. Windows refuses to rename a directory that anything still holds
+	// open, so leaving the confined root open failed the expansion at its very
+	// last step, after all the work was done and verified.
+	if err := staging.ReleaseHandle(); err != nil {
+		return nil, err
+	}
+
 	if err := exclusiveRename(staging.Path(), destination); err != nil {
 		if os.IsExist(err) || stderrors.Is(err, os.ErrExist) {
 			return nil, fault.Wrap(fault.CodeDestinationExists, extractOp,

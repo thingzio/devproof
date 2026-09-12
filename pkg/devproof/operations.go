@@ -886,18 +886,12 @@ type layerSource interface {
 //
 // It is written once and then read once, so it never needs to be resident.
 //
-// Where the platform allows it, the file is unlinked as soon as it is created:
-// nothing else opens it by name, so dropping the directory entry immediately
-// means a crash cannot leave scratch behind and no other process can observe
-// or substitute it. Windows refuses to unlink a file that is still open, so
-// there the name survives until Close removes it — a weaker guarantee, and the
-// reason this is a build tag rather than an ignored error.
+// The file is unlinked as soon as it is created: nothing else opens it by
+// name, so dropping the directory entry immediately means a crash cannot leave
+// scratch behind and no other process can observe or substitute it. This is a
+// POSIX guarantee, and DevProof supports only POSIX platforms (DP-035).
 type stagedLayer struct {
 	file *os.File
-	// path is empty once the directory entry is gone, which is immediately on
-	// unix and at Close on Windows. It doubles as the "already removed" flag,
-	// so a second Close does not report a failure to remove nothing.
-	path string
 }
 
 func newStagedLayer(tempRoot string) (*stagedLayer, error) {
@@ -905,17 +899,12 @@ func newStagedLayer(tempRoot string) (*stagedLayer, error) {
 	if err != nil {
 		return nil, fault.Wrap(fault.CodeInternal, "build", "creating the layer staging file", err)
 	}
-
-	staged := &stagedLayer{file: file, path: file.Name()}
-	if unlinkWhileOpen {
-		if err := os.Remove(staged.path); err != nil {
-			_ = file.Close()
-			return nil, fault.Wrap(fault.CodeInternal, "build",
-				"unlinking the layer staging file", err)
-		}
-		staged.path = ""
+	if err := os.Remove(file.Name()); err != nil {
+		_ = file.Close()
+		return nil, fault.Wrap(fault.CodeInternal, "build",
+			"unlinking the layer staging file", err)
 	}
-	return staged, nil
+	return &stagedLayer{file: file}, nil
 }
 
 func (s *stagedLayer) Write(p []byte) (int, error) { return s.file.Write(p) }
@@ -972,20 +961,8 @@ func (s *stagedLayer) fill(r io.Reader, want artifact.Descriptor) error {
 }
 
 func (s *stagedLayer) Close() error {
-	closeErr := s.file.Close()
-
-	// Removed after the handle is closed, because the platforms that could not
-	// unlink it while open cannot delete it while open either.
-	if s.path != "" {
-		removeErr := os.Remove(s.path)
-		s.path = ""
-		if removeErr != nil && closeErr == nil {
-			return fault.Wrap(fault.CodeInternal, "build",
-				"removing the layer staging file", removeErr)
-		}
-	}
-	if closeErr != nil {
-		return fault.Wrap(fault.CodeInternal, "build", "closing the staged layer", closeErr)
+	if err := s.file.Close(); err != nil {
+		return fault.Wrap(fault.CodeInternal, "build", "closing the staged layer", err)
 	}
 	return nil
 }
