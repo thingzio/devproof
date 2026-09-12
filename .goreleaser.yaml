@@ -36,15 +36,10 @@ builds:
     goos:
       - linux
       - darwin
+      - windows
     goarch:
       - amd64
       - arm64
-    # Windows is deliberately absent. The format is designed to be producible
-    # and consumable there, but executable-mode representation and atomic
-    # directory publication are not yet proven on it, so Windows is not in the
-    # determinism matrix and exclusiveRename fails rather than falling back to
-    # something racy (DP-022). Shipping a binary whose central guarantee is
-    # untested on its platform would be worse than shipping none.
     mod_timestamp: '{{ .CommitTimestamp }}'
 
 archives:
@@ -53,6 +48,12 @@ archives:
       - devproof
     formats:
       - tar.gz
+    # Windows gets zip, which unpacks with the shell's built-in handler and
+    # needs no extra tool installed.
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
     name_template: >-
       {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
     files:

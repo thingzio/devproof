@@ -155,14 +155,18 @@ be accepted for the remainder of the major version.
 
 ## Supported platforms
 
-Linux and macOS on amd64 and arm64 are the tested determinism matrix. Byte
-identity across every cell is verified on every push, not at release time.
+Linux, macOS, and Windows on amd64 and arm64. Byte identity across the matrix
+is verified on every push, not at release time.
 
-Windows is a separate question: the format is designed to be producible and
-consumable there, but executable-mode representation and atomic directory
-publication are not yet proven, so Windows is not in the matrix and
-`exclusiveRename` deliberately fails rather than falling back to something
-racy (DP-022).
+Windows carries one stated limitation, and only one. Building from a **local
+directory** on Windows records every regular file as `0644`, because Windows
+reports no execute bit to normalize. A tree containing files that would be
+executable on POSIX therefore produces a different subject digest there.
+
+Nothing else is affected. Reading, verifying, copying, and expanding a bundle
+from any platform is unaffected, and so are Git sources, whose modes come from
+the commit tree rather than the filesystem. The CLI warns when it builds from
+a path source on a platform that cannot observe the bit. See DP-035.
 
 ## Verifying these claims yourself
 

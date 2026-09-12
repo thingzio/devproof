@@ -600,12 +600,54 @@ would not, because being obviously correct matters more here than being fast,
 and a second implementation clever enough to be wrong in the same way as the
 first has no value.
 
+## DP-035: Windows ships, with one stated limitation
+
+The first release includes `windows/amd64` and `windows/arm64`, and Windows
+joins the determinism matrix.
+
+The deferral existed for two reasons. One was a real blocker and is fixed; the
+other turned out to be narrower than it looked.
+
+**Atomic directory publication.** `exclusiveRename` had no Windows
+implementation, so `Extract` refused outright — a Windows binary would have
+built and verified bundles but not expanded one. Windows does have the
+required primitive: `MoveFileExW` without `MOVEFILE_REPLACE_EXISTING` fails if
+the destination exists, and the test and the move are one operation inside the
+filesystem. That is precisely DP-022's requirement, and it works for
+directories. `os.Rename` could not be used because Go passes
+`MOVEFILE_REPLACE_EXISTING` to match POSIX, which is the behavior being
+avoided. `MOVEFILE_COPY_ALLOWED` is also left unset: a cross-volume move
+degrades into a non-atomic copy, and staging happens beside the destination
+so the move stays on one volume.
+
+**Executable mode.** Windows reports no execute bit — `os.Stat` synthesizes
+0666, or 0444 when the read-only attribute is set — so a path source there
+normalizes every regular file to 0644. This does not affect reading, copying,
+verifying, or expanding a bundle from any platform, and it does not affect
+Git sources at all: mode comes from the commit tree, which records `100755`
+independently of the machine reading it (DP-011).
+
+It affects exactly one case: building from a *local directory* on Windows,
+where the tree contains files that would be executable on POSIX. Those files
+are recorded as 0644, so the subject digest differs from one built on Linux or
+macOS. The CLI warns when it builds from a path source on a platform that
+cannot observe the bit, and names the Git-source alternative.
+
+Warned rather than refused, because the common case — configuration with no
+executables — produces identical digests everywhere, and refusing it would
+withhold a working tool from the majority to protect a minority who are told
+about the problem anyway.
+
+Every other Windows hazard was already designed out by the portable profile
+(DP-005): reserved device names, trailing dots and spaces, non-portable
+characters, control characters, and case-folding collisions are all rejected
+at canonicalization, so a bundle that validates cannot fail to expand on
+Windows for a naming reason.
+
+`.gitattributes` pins `* -text` so a Windows checkout does not rewrite the
+fixtures whose digests the tests assert. That is a repository property rather
+than a CI setting, so it holds for a developer's working copy too.
+
 ## Open decisions
 
-The following remain unresolved and are needed by the phase noted:
-
-1. Whether the first CLI release ships Windows binaries. The format is designed
-   to be producible and consumable on Windows, and the portable profile exists
-   for that reason, but the determinism matrix does not include Windows until
-   executable-mode and atomic directory publication are proven there. Needed by
-   phase 6.
+None. Every decision needed for format v1 is recorded above.

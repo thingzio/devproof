@@ -1,0 +1,16 @@
+# Never translate line endings, on any platform.
+#
+# A Windows checkout with the default core.autocrlf=true rewrites every text
+# file to CRLF on the way out of Git. That would change the bytes of the
+# golden fixtures and of every test's source tree, so the digests they assert
+# would not reproduce — a determinism failure caused entirely by the checkout.
+#
+# The bundle format already sidesteps this for Git sources by reading commit
+# trees rather than working directories (DP-011). This file is for everything
+# that is an ordinary file on disk: fixtures, testdata, and the repository
+# itself.
+* -text
+
+# Golden vectors are bytes, not text. Marking them binary also stops diff
+# tools from trying to render them.
+internal/canonical/testdata/format/** binary

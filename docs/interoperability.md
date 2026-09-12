@@ -143,6 +143,19 @@ devproof build ./src --to oci://<ref> --tag signed --sign --key signer.pem
 devproof verify oci://<ref>:signed --key signer.pub.pem --policy policy.yaml
 ```
 
+## Platforms
+
+| Platform | Build (Git source) | Build (path source) | Verify | Expand |
+| --- | --- | --- | --- | --- |
+| Linux amd64/arm64 | yes | yes | yes | yes |
+| macOS amd64/arm64 | yes | yes | yes | yes |
+| Windows amd64/arm64 | yes | modes normalize to `0644` | yes | yes |
+
+Windows cannot observe the execute bit, so a path source there records every
+regular file as `0644`. A tree containing POSIX-executable files therefore
+yields a different subject digest on Windows; the CLI warns when this can
+apply. Git sources are unaffected — mode comes from the commit tree (DP-035).
+
 ## Independent verification
 
 `conformance` is a second reader built only from the Go standard library and
