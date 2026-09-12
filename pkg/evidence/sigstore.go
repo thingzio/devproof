@@ -411,10 +411,22 @@ func (v *SigstoreVerifier) Verify(_ context.Context, req VerifyRequest) (*Verifi
 	}
 
 	verifier, err := verify.NewVerifier(trusted,
-		// One observer timestamp: the transparency-log entry. It is what
-		// establishes that the short-lived certificate was valid when it
-		// signed, so without it a keyless signature stops verifying as soon
-		// as the certificate expires.
+		// Three checks, and all three are needed together.
+		//
+		// WithTransparencyLog verifies the Rekor entry itself. Without it
+		// nothing verifies the entry, so it contributes no verified
+		// timestamp and WithObserverTimestamps below counts zero — which is
+		// how this failed: "threshold not met for verified signed & log entry
+		// integrated timestamps: 0 < 1", on a signature we had just created.
+		verify.WithTransparencyLog(1),
+		// WithSignedCertificateTimestamps checks the SCT embedded in the
+		// Fulcio certificate, proving the certificate was published to a
+		// certificate-transparency log rather than issued quietly to someone
+		// who compromised the CA.
+		verify.WithSignedCertificateTimestamps(1),
+		// One observer timestamp establishes that the short-lived certificate
+		// was valid when it signed. Without it a keyless signature stops
+		// verifying as soon as the certificate expires, about an hour later.
 		verify.WithObserverTimestamps(1),
 	)
 	if err != nil {
