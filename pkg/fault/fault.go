@@ -16,10 +16,19 @@
 
 // Package fault is DevProof's typed error model.
 //
-// It lives in internal/ and is re-exported by the root devproof package
-// rather than being a public package named "errors": a public
-// devproof/errors would shadow the standard library at every call site that
-// needs both errors.Is and a DevProof code, which is most of them.
+// It is public because the extension points are. A custom [source.Resolver],
+// transport, or attester returns errors into the same pipeline the built-in
+// ones do, and an error that is not an [Error] classifies as [CodeInternal] --
+// exit 10, "unexpected internal error". An extension that could not construct
+// a classified error would report every ordinary failure, a missing file or a
+// refused credential, as a bug in DevProof. [New] and [Wrap] exist so it can.
+//
+// Named "fault" rather than "errors" so that a call site needing both this and
+// the standard library does not have to rename one of them, which is most call
+// sites.
+//
+// The root devproof package aliases [Error] and [Code], so callers who only
+// consume the SDK never need to import this package directly.
 //
 // A Code doubles as a sentinel, so callers match on classification without
 // constructing a comparison value:

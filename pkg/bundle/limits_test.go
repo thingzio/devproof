@@ -20,7 +20,7 @@ import (
 	stderrors "errors"
 	"testing"
 
-	"github.com/thingzio/devproof/internal/fault"
+	"github.com/thingzio/devproof/pkg/fault"
 )
 
 // Every bound must appear in the table exactly once. A bound declared in the

@@ -26,7 +26,7 @@ import (
 	"unicode/utf16"
 	"unicode/utf8"
 
-	"github.com/thingzio/devproof/internal/fault"
+	"github.com/thingzio/devproof/pkg/fault"
 )
 
 const jsonOp = "canonical.json"

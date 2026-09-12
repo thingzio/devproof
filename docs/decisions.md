@@ -650,6 +650,44 @@ independent of platform — a backslash is a legal filename character on Linux,
 and an OCI tag cannot contain a separator, so anything that does was never a
 tag.
 
+## DP-036: Everything the CLI can do, the SDK can do
+
+DP-001 said the CLI is a thin adapter over the SDK. That was true of the
+operations and false of two things underneath them, both found by auditing the
+public surface rather than by reading the intent.
+
+**The typed error model is public.** `Error` and `Code` were aliased out of
+`internal/fault`, which works for reading an error and fails for producing
+one. The extension points are public: a custom `source.Resolver`, transport,
+or attester returns errors into the same pipeline the built-in ones do, and an
+error that is not a `fault.Error` classifies as `CodeInternal` — exit 10,
+"unexpected internal error". An extension that could not construct a
+classified error would report every missing file and refused credential as a
+bug in DevProof. `pkg/fault` exports `New` and `Wrap` so it can.
+
+It also fixes the documentation: an alias into `internal/` renders on
+pkg.go.dev as a link nobody can follow, so the fields of the primary error type
+were undiscoverable.
+
+**Docker credential resolution is public.** It was three hundred lines inside
+the CLI — configuration parsing, credential helpers, the token sentinel, host
+scoping, caching — implementing a public interface that no SDK caller could
+reach. A program embedding the SDK had to reimplement all of it to push to a
+registry the operator had already logged in to, which is the same "batteries
+sold separately" failure that DP-029 rejected for signing. It is
+`pkg/credentials` now, taking an `slog.Logger` rather than the CLI's printer,
+because a library that wrote to stderr on its own would be unusable in a
+server.
+
+What stays in the CLI is what has no meaning without a terminal: flag parsing,
+output rendering, stream discipline, progress, and the configuration file.
+Those are not capabilities, they are presentation.
+
+Consequence: a capability that exists only in `internal/cli` is a bug, not a
+layering choice. The test for whether something belongs there is whether an
+embedding application would ever want it, not whether the CLI currently owns
+it.
+
 ## Open decisions
 
 None. Every decision needed for format v1 is recorded above.

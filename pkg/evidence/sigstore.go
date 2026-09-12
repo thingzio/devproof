@@ -33,7 +33,7 @@ import (
 	"github.com/sigstore/sigstore-go/pkg/verify"
 	"google.golang.org/protobuf/encoding/protojson"
 
-	"github.com/thingzio/devproof/internal/fault"
+	"github.com/thingzio/devproof/pkg/fault"
 )
 
 const sigstoreOp = "evidence.sigstore"

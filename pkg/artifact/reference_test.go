@@ -21,7 +21,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/thingzio/devproof/internal/fault"
+	"github.com/thingzio/devproof/pkg/fault"
 )
 
 const testDigest = "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
@@ -320,4 +320,42 @@ func TestPathWithAColonRoundTrips(t *testing.T) {
 	if ref.Path != `C:\Users\runner\Temp\layout` {
 		t.Errorf("Path = %q, want the full drive path", ref.Path)
 	}
+}
+
+// ParseReference is the first thing that touches a string a user, a manifest,
+// or a registry response supplied. It must classify or reject anything without
+// panicking, and it must never invent a reference that claims both a tag and a
+// digest — that combination is ambiguous about which one identifies content.
+func FuzzParseReference(f *testing.F) {
+	for _, seed := range []string{
+		"", ":", "@", "://", "oci://",
+		"oci-layout://./layout:v1",
+		"oci://registry.example.com:5000/team/config:v1",
+		"oci://registry.example.com/team/config@sha256:" + strings.Repeat("a", 64),
+		`oci-layout://C:\dir\layout`,
+		"oci://a@sha256:x@sha256:y",
+		"\x00", "oci://\x00", strings.Repeat(":", 64),
+	} {
+		f.Add(seed)
+	}
+
+	f.Fuzz(func(t *testing.T, raw string) {
+		ref, err := ParseReference(raw)
+		if err != nil {
+			return
+		}
+		if ref.Tag != "" && ref.Digest != "" {
+			t.Fatalf("ParseReference(%q) accepted both a tag %q and a digest %q",
+				raw, ref.Tag, ref.Digest)
+		}
+		if ref.Scheme == "" {
+			t.Fatalf("ParseReference(%q) returned no scheme", raw)
+		}
+		// Parsing is a pure function of its input: the same string must not
+		// resolve two ways in one process.
+		again, againErr := ParseReference(raw)
+		if againErr != nil || again != ref {
+			t.Fatalf("ParseReference(%q) is not deterministic", raw)
+		}
+	})
 }

@@ -31,7 +31,7 @@ import (
 
 	"golang.org/x/text/unicode/norm"
 
-	"github.com/thingzio/devproof/internal/fault"
+	"github.com/thingzio/devproof/pkg/fault"
 )
 
 const op = "canonical.path"

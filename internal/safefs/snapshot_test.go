@@ -22,8 +22,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/thingzio/devproof/internal/fault"
 	"github.com/thingzio/devproof/pkg/bundle"
+	"github.com/thingzio/devproof/pkg/fault"
 )
 
 func snapshot(t *testing.T, dir string, opts SnapshotOptions) (*Snapshot, error) {

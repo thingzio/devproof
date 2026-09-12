@@ -31,7 +31,7 @@ import (
 	"testing"
 
 	"github.com/thingzio/devproof/internal/cli"
-	"github.com/thingzio/devproof/internal/fault"
+	"github.com/thingzio/devproof/pkg/fault"
 )
 
 // result is one captured command run.

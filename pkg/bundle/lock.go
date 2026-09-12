@@ -23,7 +23,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/thingzio/devproof/internal/fault"
+	"github.com/thingzio/devproof/pkg/fault"
 )
 
 const lockOp = "bundle.lock"

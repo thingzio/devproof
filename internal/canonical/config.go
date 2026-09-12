@@ -19,8 +19,8 @@ package canonical
 import (
 	"fmt"
 
-	"github.com/thingzio/devproof/internal/fault"
 	"github.com/thingzio/devproof/pkg/bundle"
+	"github.com/thingzio/devproof/pkg/fault"
 )
 
 const configOp = "canonical.config"

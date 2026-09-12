@@ -36,7 +36,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/thingzio/devproof/internal/fault"
+	"github.com/thingzio/devproof/pkg/fault"
 )
 
 // Format selects how a result is rendered.

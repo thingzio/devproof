@@ -23,7 +23,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/thingzio/devproof/internal/fault"
+	"github.com/thingzio/devproof/pkg/fault"
 )
 
 func TestPatternMatch(t *testing.T) {

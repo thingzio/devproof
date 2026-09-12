@@ -19,7 +19,7 @@ package bundle
 import (
 	"fmt"
 
-	"github.com/thingzio/devproof/internal/fault"
+	"github.com/thingzio/devproof/pkg/fault"
 )
 
 // Bound identifies one configurable resource limit.

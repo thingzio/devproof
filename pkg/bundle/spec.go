@@ -25,7 +25,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/thingzio/devproof/internal/fault"
+	"github.com/thingzio/devproof/pkg/fault"
 )
 
 const specOp = "bundle.spec"

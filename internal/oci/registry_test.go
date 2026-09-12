@@ -27,8 +27,8 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/thingzio/devproof/internal/fault"
 	"github.com/thingzio/devproof/pkg/artifact"
+	"github.com/thingzio/devproof/pkg/fault"
 )
 
 // fakeRegistry is a minimal OCI Distribution server.

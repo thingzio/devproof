@@ -21,7 +21,7 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/thingzio/devproof/internal/fault"
+	"github.com/thingzio/devproof/pkg/fault"
 )
 
 // addAll adds every path in order and returns the first failure.

@@ -14,7 +14,15 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-package cli
+// Package credentials resolves registry credentials from the environment a
+// developer or a CI runner already has.
+//
+// It is public because the CLI must not be the only way to reach it. A program
+// embedding the SDK that pushes to a registry the operator has already logged
+// in to should not have to reimplement Docker configuration parsing,
+// credential helpers, and host scoping to do what `devproof build` does with
+// no configuration at all (DP-001).
+package credentials
 
 import (
 	"bytes"
@@ -23,6 +31,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -30,8 +39,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/thingzio/devproof/internal/fault"
 	"github.com/thingzio/devproof/pkg/artifact"
+	"github.com/thingzio/devproof/pkg/fault"
 )
 
 // dockerConfig is the subset of ~/.docker/config.json that matters here.
@@ -63,8 +72,11 @@ type dockerAuth struct {
 // Lookups are cached for the process lifetime. Credential helpers shell out,
 // and a push that touches one registry a few hundred times should not run a
 // few hundred subprocesses.
-type dockerCredentials struct {
-	printer *Printer
+type Docker struct {
+	logger *slog.Logger
+	// configPath overrides discovery. Empty uses DOCKER_CONFIG, then the
+	// per-user default.
+	configPath string
 
 	once   sync.Once
 	config dockerConfig
@@ -77,13 +89,38 @@ type dockerCredentials struct {
 	cached map[string]artifact.Credential
 }
 
-// newDockerCredentials returns a provider backed by the Docker config.
-func newDockerCredentials(printer *Printer) *dockerCredentials {
-	return &dockerCredentials{printer: printer, cached: make(map[string]artifact.Credential)}
+// DockerOptions configures a [Docker] provider.
+type DockerOptions struct {
+	// ConfigPath overrides the configuration location. Empty uses
+	// DOCKER_CONFIG when set, then ~/.docker/config.json.
+	ConfigPath string
+	// Logger receives diagnostics: an unreadable configuration, a credential
+	// helper named but not installed. Nil discards them, because a library
+	// that printed to stderr on its own would be unusable inside a server.
+	Logger *slog.Logger
+}
+
+// NewDocker returns a provider backed by the Docker configuration.
+//
+// Nothing is read until the first lookup, so constructing one is free and
+// cannot fail.
+func NewDocker(opts DockerOptions) *Docker {
+	logger := opts.Logger
+	if logger == nil {
+		logger = slog.New(slog.DiscardHandler)
+	}
+	return &Docker{
+		logger:     logger,
+		configPath: opts.ConfigPath,
+		cached:     make(map[string]artifact.Credential),
+	}
 }
 
 // configPath returns the Docker config location.
-func dockerConfigPath() (string, error) {
+func (d *Docker) resolveConfigPath() (string, error) {
+	if d.configPath != "" {
+		return d.configPath, nil
+	}
 	if dir := os.Getenv("DOCKER_CONFIG"); dir != "" {
 		return filepath.Join(dir, "config.json"), nil
 	}
@@ -94,8 +131,8 @@ func dockerConfigPath() (string, error) {
 	return filepath.Join(home, ".docker", "config.json"), nil
 }
 
-func (d *dockerCredentials) load() {
-	path, err := dockerConfigPath()
+func (d *Docker) load() {
+	path, err := d.resolveConfigPath()
 	if err != nil {
 		d.loadErr = err
 		return
@@ -118,13 +155,13 @@ func (d *dockerCredentials) load() {
 // A registry with no entry gets anonymous access rather than an error: public
 // registries exist, and failing here would make an unauthenticated pull
 // impossible on a machine that has never run `docker login`.
-func (d *dockerCredentials) Credential(ctx context.Context, registry string) (artifact.Credential, error) {
+func (d *Docker) Credential(ctx context.Context, registry string) (artifact.Credential, error) {
 	d.once.Do(d.load)
 	if d.loadErr != nil {
 		// Reported once, as a warning: an unreadable config means the pull
 		// proceeds anonymously, and silently getting a 401 later would send
 		// the operator looking in the wrong place.
-		d.printer.Warn("ignoring the Docker configuration: %v", d.loadErr)
+		d.logger.Warn("ignoring the Docker configuration", "error", d.loadErr)
 		d.loadErr = nil
 	}
 
@@ -146,7 +183,7 @@ func (d *dockerCredentials) Credential(ctx context.Context, registry string) (ar
 	return cred, nil
 }
 
-func (d *dockerCredentials) resolve(ctx context.Context, registry string) (artifact.Credential, error) {
+func (d *Docker) resolve(ctx context.Context, registry string) (artifact.Credential, error) {
 	// A per-registry helper wins over the global store, which is how a
 	// machine with one cloud registry and one private registry is configured.
 	if helper, ok := d.config.CredHelpers[registry]; ok {
@@ -245,7 +282,7 @@ type helperOutput struct {
 }
 
 // fromHelper runs a docker-credential-<name> binary.
-func (d *dockerCredentials) fromHelper(ctx context.Context, helper, registry string) (artifact.Credential, error) {
+func (d *Docker) fromHelper(ctx context.Context, helper, registry string) (artifact.Credential, error) {
 	ctx, cancel := context.WithTimeout(ctx, helperTimeout)
 	defer cancel()
 
@@ -255,7 +292,8 @@ func (d *dockerCredentials) fromHelper(ctx context.Context, helper, registry str
 		// Configured but absent is worth saying out loud: the operator
 		// believes they are authenticated, and the request is about to fail
 		// as anonymous for a reason that is not otherwise visible.
-		d.printer.Warn("credential helper %q is configured for %s but was not found in PATH", name, registry)
+		d.logger.Warn("credential helper is configured but not installed",
+			"helper", name, "registry", registry)
 		return artifact.Credential{}, nil
 	}
 

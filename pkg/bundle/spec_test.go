@@ -22,7 +22,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/thingzio/devproof/internal/fault"
+	"github.com/thingzio/devproof/pkg/fault"
 )
 
 const validManifest = `

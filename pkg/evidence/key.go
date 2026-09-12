@@ -29,7 +29,7 @@ import (
 	"encoding/pem"
 	"fmt"
 
-	"github.com/thingzio/devproof/internal/fault"
+	"github.com/thingzio/devproof/pkg/fault"
 )
 
 const keyOp = "evidence.key"

@@ -27,7 +27,7 @@ import (
 
 	"golang.org/x/text/unicode/norm"
 
-	"github.com/thingzio/devproof/internal/fault"
+	"github.com/thingzio/devproof/pkg/fault"
 )
 
 // testLimits are generous enough that only the rule under test can fail.

@@ -24,8 +24,8 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/thingzio/devproof/internal/fault"
 	"github.com/thingzio/devproof/pkg/bundle"
+	"github.com/thingzio/devproof/pkg/fault"
 )
 
 const tarOp = "canonical.tar"

@@ -25,7 +25,7 @@ import (
 	"testing"
 
 	"github.com/thingzio/devproof/internal/cli"
-	"github.com/thingzio/devproof/internal/fault"
+	"github.com/thingzio/devproof/pkg/fault"
 )
 
 // writeConfig writes a configuration file and returns its path.

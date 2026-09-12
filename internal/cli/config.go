@@ -24,7 +24,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/thingzio/devproof/internal/fault"
+	"github.com/thingzio/devproof/pkg/fault"
 )
 
 // Configuration precedence, highest first:

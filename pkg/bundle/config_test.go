@@ -21,7 +21,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/thingzio/devproof/internal/fault"
+	"github.com/thingzio/devproof/pkg/fault"
 )
 
 func digestOf(s string) string { return DigestOf([]byte(s)).String() }

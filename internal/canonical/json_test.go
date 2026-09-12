@@ -21,7 +21,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/thingzio/devproof/internal/fault"
+	"github.com/thingzio/devproof/pkg/fault"
 )
 
 func TestCanonicalizeJSON(t *testing.T) {

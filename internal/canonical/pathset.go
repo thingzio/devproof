@@ -20,7 +20,7 @@ import (
 	"fmt"
 	"slices"
 
-	"github.com/thingzio/devproof/internal/fault"
+	"github.com/thingzio/devproof/pkg/fault"
 )
 
 const setOp = "canonical.pathset"

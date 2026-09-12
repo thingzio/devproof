@@ -21,7 +21,7 @@ import (
 	stderrors "errors"
 	"testing"
 
-	"github.com/thingzio/devproof/internal/fault"
+	"github.com/thingzio/devproof/pkg/fault"
 )
 
 func validLock() *Lock {

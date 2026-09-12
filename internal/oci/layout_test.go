@@ -24,9 +24,9 @@ import (
 	"testing"
 
 	"github.com/thingzio/devproof/internal/canonical"
-	"github.com/thingzio/devproof/internal/fault"
 	"github.com/thingzio/devproof/pkg/artifact"
 	"github.com/thingzio/devproof/pkg/bundle"
+	"github.com/thingzio/devproof/pkg/fault"
 )
 
 func newLayout(t *testing.T) *Layout {

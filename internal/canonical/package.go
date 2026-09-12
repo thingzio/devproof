@@ -22,9 +22,9 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/thingzio/devproof/internal/fault"
 	"github.com/thingzio/devproof/pkg/artifact"
 	"github.com/thingzio/devproof/pkg/bundle"
+	"github.com/thingzio/devproof/pkg/fault"
 )
 
 const packageOp = "canonical.package"

@@ -20,7 +20,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/thingzio/devproof/internal/fault"
+	"github.com/thingzio/devproof/pkg/fault"
 	"github.com/thingzio/devproof/pkg/policy"
 )
 

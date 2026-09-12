@@ -30,11 +30,12 @@ import (
 
 	"github.com/urfave/cli/v3"
 
-	"github.com/thingzio/devproof/internal/fault"
 	"github.com/thingzio/devproof/internal/version"
 	"github.com/thingzio/devproof/pkg/bundle"
+	"github.com/thingzio/devproof/pkg/credentials"
 	"github.com/thingzio/devproof/pkg/devproof"
 	"github.com/thingzio/devproof/pkg/evidence"
+	"github.com/thingzio/devproof/pkg/fault"
 )
 
 // envPrefix namespaces every environment variable.
@@ -368,16 +369,17 @@ func (a *App) setting(cmd *cli.Command, flag, fromConfig string) string {
 func (a *App) client(cmd *cli.Command, extra ...devproof.Option) (*devproof.Client, error) {
 	// Registry credentials come from the Docker configuration, so that
 	// `docker login` — which every operator and CI runner has already run —
-	// is all the setup there is.
-	credentials := newDockerCredentials(a.printer)
+	// is all the setup there is. The provider is SDK-public: the CLI gets no
+	// capability here that an embedding application cannot have (DP-001).
+	provider := credentials.NewDocker(credentials.DockerOptions{Logger: a.logger()})
 
 	opts := []devproof.Option{
 		devproof.WithLogger(a.logger()),
-		devproof.WithRegistryCredentials(credentials),
+		devproof.WithRegistryCredentials(provider),
 	}
 	if cmd.Bool("insecure-registry") {
 		a.printer.Warn("registry transport is plain HTTP; credentials and content are sent in the clear")
-		opts = append(opts, devproof.WithInsecureRegistry(credentials))
+		opts = append(opts, devproof.WithInsecureRegistry(provider))
 	}
 	opts = append(opts, extra...)
 	return devproof.New(opts...)

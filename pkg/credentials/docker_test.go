@@ -14,13 +14,14 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-package cli
+package credentials
 
 import (
 	"bytes"
 	"context"
 	"encoding/base64"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -41,13 +42,13 @@ func withDockerConfig(t *testing.T, body string) {
 	t.Setenv("DOCKER_CONFIG", dir)
 }
 
-// newTestProvider returns a provider writing diagnostics to a buffer.
-func newTestProvider(t *testing.T) (*dockerCredentials, *bytes.Buffer) {
+// newTestProvider returns a provider whose diagnostics land in a buffer.
+func newTestProvider(t *testing.T) (*Docker, *bytes.Buffer) {
 	t.Helper()
 
-	var stderr bytes.Buffer
-	printer := &Printer{Streams: Streams{Out: &bytes.Buffer{}, Err: &stderr}, Format: FormatText}
-	return newDockerCredentials(printer), &stderr
+	var logged bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&logged, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	return NewDocker(DockerOptions{Logger: logger}), &logged
 }
 
 func basicAuth(user, pass string) string {

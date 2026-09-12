@@ -22,7 +22,7 @@ import (
 	"io"
 
 	"github.com/thingzio/devproof/internal/canonical/deflate"
-	"github.com/thingzio/devproof/internal/fault"
+	"github.com/thingzio/devproof/pkg/fault"
 )
 
 const gzipOp = "canonical.gzip"
