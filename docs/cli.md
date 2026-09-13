@@ -158,33 +158,39 @@ devproof build -f devproof.yaml \
   --to oci://registry.example.com/team/config:v1
 ```
 
-Direct source mode:
+Direct source mode, which takes one local directory:
 
 ```text
 devproof build ./content --to oci-layout://./artifact
 
-devproof build https://github.com/example/config.git \
-  --git-ref 0123456789abcdef0123456789abcdef01234567 \
-  --git-sub-path deploy \
-  --to oci://registry.example.com/team/config:v1
+devproof build ./content \
+  --mount app \
+  --include "config/**" \
+  --exclude "**/*.tmp" \
+  --to oci://registry.example.com/team/config:v1 --tag v1
 ```
+
+A Git source is written in a manifest rather than given on the command line.
+It needs a URL, a ref, and optionally a subpath, and a flag set large enough
+to express that is a manifest with worse ergonomics and no way to review it.
 
 Rules:
 
 - `--file` and a positional direct source are mutually exclusive.
-- Manifest mode requires a matching lock by default.
+- Manifest mode requires a matching lock by default. `--no-lock` builds without
+  one, which is for a throwaway artifact rather than a release.
 - `--update-lock` explicitly resolves and atomically replaces the lock before
   building; it is never implied by `build`.
-- Direct Git mode requires `--git-ref`. It resolves and reports an immutable
-  commit even when the input is already commit-shaped.
-- `--write-lock PATH` records the synthesized direct-mode lock.
+- `--mount PREFIX` places a direct source below a prefix. `--include` and
+  `--exclude` are repeatable selection patterns with the same syntax the
+  manifest uses.
 - `--to` is required until a documented local-layout default is selected.
 - Supported destinations initially use `oci://` and `oci-layout://` schemes.
-- A registry tag is optional; publication results always print the digest
-  reference.
-- `--sign` selects the configured signing provider. `--attest` emits provenance;
-  policy or configuration may require both.
-- A requested tag is assigned only after digest publication succeeds.
+- `--tag` is optional; publication results always print the digest reference,
+  and a requested tag is assigned only after digest publication succeeds.
+- `--sign` signs provenance and attaches it to the subject. It is keyless by
+  default; `--key PATH` uses a PEM private key instead, and `--fulcio-url` and
+  `--rekor-url` select a private Sigstore deployment.
 
 Text output reports the canonical digest reference, tree digest, file and byte
 counts, and evidence descriptors. Quiet output is the canonical digest
@@ -234,7 +240,7 @@ Rules:
   supplied it is evaluated *before* anything is written, and an unsatisfied
   policy publishes no destination at all (DP-032).
 - The destination must not exist.
-- There is no `--force`, merge, strip-components, ownership, or permission
+- There is no force, merge, strip-components, ownership, or permission
   preservation flag in v1.
 - No destination is published after failure or cancellation.
 - `--offline` has the same semantics as verify.
@@ -303,6 +309,37 @@ policy-accepted. It performs no expansion and no remote mutation.
 
 `--files` includes the potentially large file inventory. `--evidence` includes
 referrer summaries. Full evidence payloads require `--evidence-content`.
+
+## `devproof copy`
+
+```text
+devproof copy oci://registry.example.com/team/config@sha256:... \
+  --to oci-layout://./mirror --tag v1
+```
+
+Copies a subject between registries, layouts, or repositories. Integrity is
+verified at the source and the copy is published under the same rules as a
+build, so a copy cannot launder a broken artifact into a destination that looks
+authoritative.
+
+The subject digest is unchanged by definition: identity is a function of
+content and format version, and a repository name is neither (DP-002).
+`--require-digest` rejects a source tag before anything is fetched.
+
+Evidence is not copied. A copy carries the payload only, so evidence attached
+at the source has to be re-attached at the destination — see
+[the roadmap](roadmap.md).
+
+## `devproof version`
+
+```text
+devproof version
+```
+
+Reports the version, the commit it was built from, and the bundle format
+versions this build supports. With `--format json` it is the machine-readable
+form a CI job records alongside a result, which is what makes a later "which
+build produced this" answerable.
 
 ## `devproof conformance`
 

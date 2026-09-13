@@ -152,10 +152,24 @@ type Report struct {
 	// "tag-fallback". The fallback cannot express a set, so a consumer needs
 	// to know which mode produced the answer (DP-028).
 	EvidenceStorage string `json:"evidenceStorage,omitempty"`
+	// AcceptedEvidence describes the evidence the conclusion rests on.
+	//
+	// Recording who signed is not enough. Two statements from the same trusted
+	// signer can say entirely different things about an artifact, and a report
+	// that named the signer but not the statement could not answer "what was
+	// this verified against" after the fact.
+	AcceptedEvidence []AcceptedEvidence `json:"acceptedEvidence,omitempty"`
 	// RejectedEvidence summarizes candidates that did not verify, kept
 	// separate from findings so "the policy was not satisfied" and "somebody
 	// attached junk" stay distinguishable.
 	RejectedEvidence []string `json:"rejectedEvidence,omitempty"`
+	// TrustRoots identifies the trust material by digest.
+	//
+	// The same policy reaches different conclusions under different roots, so
+	// a result that named only the policy did not identify the rules that
+	// produced it. Digests rather than paths: a path is a fact about one
+	// machine, and trust material is not a secret but its location can be.
+	TrustRoots []string `json:"trustRoots,omitempty"`
 
 	// Limits records the bounds this verification actually ran under and
 	// where each came from (DP-021).
@@ -168,6 +182,21 @@ type Report struct {
 	Limits []Limit `json:"limits,omitempty"`
 
 	Findings []Finding `json:"findings,omitempty"`
+}
+
+// AcceptedEvidence is one verified statement the result relied on.
+type AcceptedEvidence struct {
+	// Digest identifies the evidence object.
+	Digest string `json:"digest"`
+	// PredicateType is what the statement claims to be.
+	PredicateType string `json:"predicateType,omitempty"`
+	// TransparencyLogVerified reports whether an inclusion proof was checked.
+	TransparencyLogVerified bool `json:"transparencyLogVerified,omitempty"`
+	// IntegratedTime is the authenticated signing time, when one exists.
+	IntegratedTime string `json:"integratedTime,omitempty"`
+	// ViaTagFallback reports that the evidence was found under the fallback
+	// tag scheme, which cannot express a set (DP-028).
+	ViaTagFallback bool `json:"viaTagFallback,omitempty"`
 }
 
 // Limit is one resource bound as it applied to a verification.

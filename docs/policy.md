@@ -246,18 +246,24 @@ Messages are not stable APIs; codes and JSON field meanings are.
 
 ## Proof report
 
-The complete verification result is the DevProof proof report. It records:
+The complete verification result is the DevProof proof report. Its grammar is
+the [proof-report schema](../schemas/proof-report.v1.schema.json). It records:
 
 - subject and tree digests;
-- integrity checks performed;
-- policy and trust-root identifiers;
+- the status of each dimension: integrity, trust, and semantics;
+- policy name and digest, and the trust material by digest;
 - accepted signer identities;
-- accepted evidence descriptors and predicate types;
+- accepted evidence: digest, predicate type, authenticated signing time when
+  one exists, and whether a transparency-log inclusion proof was checked;
 - rejected candidate summaries;
+- how evidence was found — the referrers API or the fallback tag scheme;
 - evaluation time when applicable;
-- the effective resource limits and which input supplied each (DP-021);
-- individual findings; and
-- overall dimension statuses.
+- the effective resource limits and which input supplied each (DP-021); and
+- individual findings.
+
+Unlike the input documents, the report is output: nothing decodes it strictly,
+so a consumer that ignores a field a later version added degrades rather than
+fails. What does not change is the meaning of a field that is present.
 
 Every bound appears, including the ones left at their defaults, because a
 reader cannot tell a default from an omission. Text output shows only the

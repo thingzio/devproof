@@ -697,6 +697,7 @@ func (c *Client) evaluatePolicy(
 	report.TreeDigest = subject.TreeDigest.String()
 	report.Limits = limitRecords(limits)
 	report.PolicyName = doc.Metadata.Name
+	report.TrustRoots = c.trustRootDigests()
 	report.EvaluatedAt = evaluatedAt.UTC().Format(time.RFC3339)
 	report.EvidenceStorage = storage
 	if digest, _, err := canonical.JSONDigest(doc); err == nil {

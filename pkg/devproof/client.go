@@ -23,6 +23,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/thingzio/devproof/internal/canonical"
 	"github.com/thingzio/devproof/internal/oci"
 	"github.com/thingzio/devproof/pkg/artifact"
 	"github.com/thingzio/devproof/pkg/bundle"
@@ -224,6 +225,22 @@ func WithVerifier(verifier evidence.Verifier) Option {
 		c.verifier = verifier
 		return nil
 	}
+}
+
+// trustRootDigests identifies the trust material a result was reached under.
+//
+// By digest rather than by path: the same policy reaches different conclusions
+// under different roots, so a result has to name them, and a filesystem path
+// is a fact about one machine.
+func (c *Client) trustRootDigests() []string {
+	if len(c.trustRoots) == 0 {
+		return nil
+	}
+	digests := make([]string, 0, len(c.trustRoots))
+	for _, root := range c.trustRoots {
+		digests = append(digests, canonical.DigestOf(root).String())
+	}
+	return digests
 }
 
 // WithTrustRoots supplies trust material for evidence verification.

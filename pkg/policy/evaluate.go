@@ -115,6 +115,7 @@ func Evaluate(doc *Document, input Input) *Report {
 
 	evaluateSubject(doc, input, report)
 	accepted := evaluateSignatures(doc, input, report)
+	recordAccepted(accepted, report)
 	evaluateFreshness(doc, input, accepted, report)
 	evaluateProvenance(doc, input, accepted, report)
 	evaluateCandidates(doc, input, report)
@@ -245,6 +246,27 @@ func evaluateSignatures(doc *Document, input Input, report *Report) []VerifiedEv
 		}
 	}
 	return accepted
+}
+
+// recordAccepted describes the evidence the conclusion rests on.
+//
+// The statement, not merely its signer: two statements from one trusted signer
+// can say entirely different things about an artifact.
+func recordAccepted(accepted []VerifiedEvidence, report *Report) {
+	for _, item := range accepted {
+		entry := AcceptedEvidence{
+			Digest:                  item.Digest,
+			TransparencyLogVerified: item.TransparencyLogVerified,
+			ViaTagFallback:          item.ViaTagFallback,
+		}
+		if item.Statement != nil {
+			entry.PredicateType = item.Statement.PredicateType
+		}
+		if item.IntegratedTime != nil {
+			entry.IntegratedTime = item.IntegratedTime.UTC().Format(time.RFC3339)
+		}
+		report.AcceptedEvidence = append(report.AcceptedEvidence, entry)
+	}
 }
 
 // matchIdentity returns a stable key for the policy rule an identity matched.

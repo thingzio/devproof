@@ -21,6 +21,11 @@
 // and pkg/policy are one implementation of them, in the same way that
 // pkg/conformance is one implementation of the bundle format specification.
 //
+// The proof report is the one output document among them. Nothing decodes it
+// strictly, because a consumer that ignores a field a later version added
+// should degrade rather than fail; what must not change is the meaning of a
+// field that is present.
+//
 // This package exists so the drift test has one place to name them. It
 // deliberately does not embed them into the binary: nothing at runtime
 // validates a document against a schema, because the decoders already reject
@@ -40,11 +45,12 @@ const (
 	BundleLock         = "bundle-lock.v1alpha1.schema.json"
 	BundleConfig       = "bundle-config.v1.schema.json"
 	VerificationPolicy = "verification-policy.v1alpha1.schema.json"
+	ProofReport        = "proof-report.v1.schema.json"
 )
 
 // All lists every published schema.
 func All() []string {
-	return []string{Bundle, BundleLock, BundleConfig, VerificationPolicy}
+	return []string{Bundle, BundleLock, BundleConfig, VerificationPolicy, ProofReport}
 }
 
 // Path returns the path of one schema file.

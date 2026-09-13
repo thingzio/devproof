@@ -1,0 +1,169 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://devproof.thingz.io/schemas/proof-report.v1.schema.json",
+  "title": "DevProof proof report",
+  "description": "The complete result of verifying one subject. It records what was checked, not merely whether it passed, so a consumer can tell a verification that proved a great deal from one that proved very little. Unlike the input documents, this schema describes output: DevProof produces it and nothing decodes it strictly, so a consumer that ignores an unrecognized field degrades safely. What must not change is the meaning of a field that is present. Messages are not a stable API; codes and field meanings are.",
+  "type": "object",
+  "required": ["integrity", "trust", "semantics", "subjectDigest", "fileCount", "totalBytes"],
+  "properties": {
+    "integrity": {
+      "$ref": "#/$defs/status",
+      "description": "Whether the artifact's own parts agree. Always evaluated; there is no flag that disables it."
+    },
+    "trust": {
+      "$ref": "#/$defs/status",
+      "description": "Whether evidence satisfied the supplied policy. Without a policy this is not-evaluated, which is never a pass."
+    },
+    "semantics": {
+      "$ref": "#/$defs/status",
+      "description": "Whether a caller-supplied validator accepted the payload. DevProof has no opinion about payload meaning, so this is not-evaluated unless a caller supplied one."
+    },
+    "subjectDigest": {
+      "$ref": "#/$defs/digest",
+      "description": "What was verified. A result always names its subject by digest, never by the tag it may have been reached through (DP-007)."
+    },
+    "treeDigest": {
+      "$ref": "#/$defs/digest",
+      "description": "The payload's identity, independent of its encoding. Recomputed from the layer rather than read from the config."
+    },
+    "format": {
+      "type": "string",
+      "description": "The bundle format version that was read."
+    },
+    "fileCount": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "totalBytes": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "acceptedIdentities": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "The signers whose signatures verified and whose identities a policy rule accepted. Only signers a rule named appear; listing an unexamined signer beside a trusted one would make the field useless for the question it answers."
+    },
+    "acceptedEvidence": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/acceptedEvidence" },
+      "description": "The evidence the conclusion rests on. Two statements from one trusted signer can say entirely different things about an artifact, so the signer alone does not identify what was verified."
+    },
+    "rejectedEvidence": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Candidates that did not verify, kept separate from findings so \"the policy was not satisfied\" and \"somebody attached junk\" stay distinguishable."
+    },
+    "policyDigest": {
+      "$ref": "#/$defs/digest",
+      "description": "The policy that was applied, so a result can be re-checked against the rules that produced it."
+    },
+    "policyName": {
+      "type": "string",
+      "description": "The policy's metadata name, for diagnostics."
+    },
+    "trustRoots": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/digest" },
+      "description": "The trust material by digest. The same policy reaches different conclusions under different roots. Digests rather than paths: trust material is not a secret, but its location on a machine is not a fact about the result."
+    },
+    "evaluatedAt": {
+      "type": "string",
+      "format": "date-time",
+      "description": "The single time every time-dependent rule used, so two rules in one evaluation cannot disagree about now."
+    },
+    "evidenceStorage": {
+      "type": "string",
+      "enum": ["referrers", "tag-fallback"],
+      "description": "How evidence was found. The fallback tag scheme cannot express a set and silently replaces, so a consumer needs to know which mode produced the answer (DP-028)."
+    },
+    "limits": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/limit" },
+      "description": "The bounds this verification actually ran under and where each came from (DP-021). Every bound appears, including the ones left at their defaults, because a reader cannot tell a default from an omission."
+    },
+    "findings": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/finding" }
+    }
+  },
+  "$defs": {
+    "status": {
+      "type": "string",
+      "enum": ["pass", "fail", "not-evaluated"],
+      "description": "not-evaluated is never a pass. A dimension nobody checked cannot satisfy a requirement (DP-014)."
+    },
+    "digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "acceptedEvidence": {
+      "type": "object",
+      "required": ["digest"],
+      "properties": {
+        "digest": { "$ref": "#/$defs/digest" },
+        "predicateType": {
+          "type": "string",
+          "description": "What the statement claims to be."
+        },
+        "transparencyLogVerified": {
+          "type": "boolean",
+          "description": "Whether an inclusion proof was checked, not merely whether a log entry was referenced."
+        },
+        "integratedTime": {
+          "type": "string",
+          "format": "date-time",
+          "description": "The authenticated signing time, when one exists. Absent means no trusted time was established, which is not the same as recent."
+        },
+        "viaTagFallback": {
+          "type": "boolean",
+          "description": "Found under the fallback tag scheme rather than the referrers API."
+        }
+      }
+    },
+    "limit": {
+      "type": "object",
+      "required": ["name", "value", "origin"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "The bound's stable name, matching the policy field that sets it."
+        },
+        "value": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "The effective bound: the smallest anybody asked for (DP-021)."
+        },
+        "origin": {
+          "type": "string",
+          "enum": ["default", "client", "request", "policy"],
+          "description": "Which input supplied that value. A policy that tightened a bound and a client that did are the same number and very different facts about who decided it."
+        }
+      }
+    },
+    "finding": {
+      "type": "object",
+      "required": ["code", "severity", "message"],
+      "properties": {
+        "code": {
+          "type": "string",
+          "description": "A stable machine identifier. Codes are an API; messages are not."
+        },
+        "rule": {
+          "type": "string",
+          "description": "The policy path the finding came from, such as evidence.maxAge."
+        },
+        "severity": {
+          "type": "string",
+          "enum": ["error", "warning"]
+        },
+        "subject": {
+          "type": "string",
+          "description": "The affected digest, evidence, source, or path."
+        },
+        "message": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

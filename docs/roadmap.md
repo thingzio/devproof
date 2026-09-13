@@ -4,31 +4,33 @@ The roadmap orders work by dependency and risk. It intentionally establishes
 canonical bytes and safe read behavior before registry publication or signing.
 
 **Phases 0 through 3 are delivered. Phases 4 through 6 are substantially
-built but do not meet their own exit criteria yet.** The phases are kept here
-because those criteria are the standing definition of done, and because the
-order explains why the codebase is shaped the way it is.
+built and each has a named gap below.** The phases are kept here because those
+criteria are the standing definition of done, and because the order explains
+why the codebase is shaped the way it is.
 
 Known outstanding against the criteria above:
 
-- **Phase 1 and 4.** Standalone `verify` does not fetch or hash the payload
-  layer; it checks the manifest and config against each other and the
-  manifest's layer descriptor against itself. A subject whose layer is absent
-  or altered currently reports `integrity: pass`. Until that is fixed, the
-  Phase 1 criterion that failures publish nothing and the Phase 4 criterion
-  that policy consumes only verified claims are both unmet.
-- **Phase 4.** A policy-gated `expand` evaluates its policy and gates on it
-  correctly, then returns a freshly constructed report saying
-  `trust: not-evaluated`. Offline verification is a flag check rather than a
-  network boundary. Evidence copy is not implemented.
-- **Phase 0.** Manifest, lock, config, and policy schemas are published under
-  `schemas/`; the proof report and provenance predicate are not.
-- **Phase 6.** `pkg/conformance` checks structure and much of the canonical
-  model, not exact writer bytes, and this document and DP-019 disagree about
-  PAX and time fields. A second independent read implementation does not
-  exist.
+- **Phase 4.** Evidence is not copied with its subject. A `copy` carries the
+  payload only, so evidence attached at the source has to be re-attached at
+  the destination or it is simply gone.
+- **Phase 0.** The provenance predicate has no published schema. Manifest,
+  lock, config, policy, and the proof report do.
+- **Phase 6.** A second independent read implementation in another language
+  does not exist. `pkg/conformance` is one in Go — it shares no code with the
+  writer and checks structure, canonical semantics, and the published byte
+  vectors — but two implementations in one language and one standard library
+  can still share an assumption neither author noticed.
 
 That list is the real roadmap. Writing "delivered" against phases whose exit
 criteria are unmet is how a roadmap stops being useful.
+
+Closed since this list was first written: standalone `verify` now fetches and
+hashes the payload, so a subject whose layer is absent or altered fails rather
+than reporting `integrity: pass`; a policy-gated `expand` returns the report it
+evaluated rather than a fresh one claiming `trust: not-evaluated`; `--offline`
+refuses a transport that can open a connection rather than checking a flag;
+and the format document and DP-019 no longer disagree about PAX and time
+fields.
 
 ## Phase 0: Freeze the implementable design
 

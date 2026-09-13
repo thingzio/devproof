@@ -669,3 +669,133 @@ func markdownFiles(t *testing.T) []string {
 	}
 	return out
 }
+
+// reportSchemaObjects maps a Go type to the schema definition describing it.
+var reportSchemaObjects = map[reflect.Type]string{
+	reflect.TypeOf(policy.Report{}):           "",
+	reflect.TypeOf(policy.Finding{}):          "finding",
+	reflect.TypeOf(policy.Limit{}):            "limit",
+	reflect.TypeOf(policy.AcceptedEvidence{}): "acceptedEvidence",
+}
+
+// TestProofReportSchemaCoversEveryField catches a report field nobody
+// documented.
+//
+// The report is the output half of the contract and the only place a consumer
+// learns what a verification established. A field added to the Go type and not
+// to the schema is a fact DevProof publishes and does not describe; a field in
+// the schema with no Go field is a promise nothing keeps. docs/policy.md listed
+// three of the latter -- accepted evidence descriptors, trust-root
+// identifiers, and the integrity checks performed -- against a type that had
+// no field for any of them.
+func TestProofReportSchemaCoversEveryField(t *testing.T) {
+	t.Parallel()
+
+	raw, err := os.ReadFile(schema.Path(schema.ProofReport))
+	if err != nil {
+		t.Fatalf("reading the schema: %v", err)
+	}
+
+	var document struct {
+		Properties map[string]json.RawMessage `json:"properties"`
+		Defs       map[string]struct {
+			Properties map[string]json.RawMessage `json:"properties"`
+		} `json:"$defs"`
+	}
+	if err := json.Unmarshal(raw, &document); err != nil {
+		t.Fatalf("decoding the schema: %v", err)
+	}
+
+	for goType, def := range reportSchemaObjects {
+		properties := document.Properties
+		if def != "" {
+			properties = document.Defs[def].Properties
+			if properties == nil {
+				t.Errorf("the schema has no $defs/%s", def)
+				continue
+			}
+		}
+
+		documented := map[string]bool{}
+		for name := range properties {
+			documented[name] = true
+		}
+
+		for i := range goType.NumField() {
+			name := jsonFieldName(goType.Field(i))
+			if name == "" {
+				continue
+			}
+			if !documented[name] {
+				t.Errorf("%s.%s marshals as %q, which the schema does not describe",
+					goType.Name(), goType.Field(i).Name, name)
+			}
+			delete(documented, name)
+		}
+		for name := range documented {
+			t.Errorf("the schema describes %q, which %s does not produce", name, goType.Name())
+		}
+	}
+}
+
+// jsonFieldName returns the name a field marshals as, or "" when it does not.
+func jsonFieldName(field reflect.StructField) string {
+	tag := field.Tag.Get("json")
+	if tag == "-" {
+		return ""
+	}
+	name, _, _ := strings.Cut(tag, ",")
+	if name == "" {
+		return field.Name
+	}
+	return name
+}
+
+// TestProofReportValidatesAgainstItsSchema runs a populated report through the
+// published schema, which catches a value shape the field list cannot: a
+// status spelled differently, a digest without its algorithm, a limit origin
+// nobody defined.
+func TestProofReportValidatesAgainstItsSchema(t *testing.T) {
+	t.Parallel()
+
+	report := &policy.Report{
+		Integrity:          policy.StatusPass,
+		Trust:              policy.StatusFail,
+		Semantics:          policy.StatusNotEvaluated,
+		SubjectDigest:      testDigest,
+		TreeDigest:         testDigest,
+		Format:             string(bundle.FormatV1),
+		FileCount:          3,
+		TotalBytes:         4096,
+		AcceptedIdentities: []string{"https://token.actions.githubusercontent.com|repo"},
+		AcceptedEvidence: []policy.AcceptedEvidence{{
+			Digest:                  testDigest,
+			PredicateType:           bundle.PredicateTypeProvenanceV1,
+			TransparencyLogVerified: true,
+			IntegratedTime:          "2026-03-01T12:00:00Z",
+		}},
+		RejectedEvidence: []string{testDigest + ": not a DSSE envelope"},
+		PolicyDigest:     testDigest,
+		PolicyName:       "release-bundles",
+		TrustRoots:       []string{testDigest},
+		EvaluatedAt:      "2026-03-01T12:00:00Z",
+		EvidenceStorage:  "referrers",
+		Limits: []policy.Limit{
+			{Name: "maxFiles", Value: 10000, Origin: "policy"},
+			{Name: "maxExpandedBytes", Value: 1073741824, Origin: "default"},
+		},
+		Findings: []policy.Finding{{
+			Code: "evidence-expired", Rule: "evidence.maxAge",
+			Severity: policy.SeverityError, Subject: testDigest,
+			Message: "this evidence was signed too long ago",
+		}},
+	}
+
+	encoded, err := json.Marshal(report)
+	if err != nil {
+		t.Fatalf("encoding the report: %v", err)
+	}
+	if err := compile(t, schema.ProofReport).Validate(asJSONValue(t, encoded)); err != nil {
+		t.Errorf("a populated report does not satisfy its own schema:\n%v", err)
+	}
+}
