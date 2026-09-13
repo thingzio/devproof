@@ -93,6 +93,10 @@ const (
 	FindingSignerNotAllowed        = "signer-identity-not-allowed"
 	FindingTransparencyProof       = "transparency-proof-required"
 	FindingProvenanceRequired      = "provenance-required"
+	// FindingProvenanceInconsistent marks a signed statement whose claims
+	// contradict what verification established. A signature proves authorship,
+	// not truth.
+	FindingProvenanceInconsistent  = "provenance-inconsistent"
 	FindingPredicateNotAllowed     = "predicate-not-allowed"
 	FindingBuilderNotAllowed       = "builder-not-allowed"
 	FindingLockDigestRequired      = "lock-digest-required"

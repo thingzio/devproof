@@ -654,7 +654,10 @@ func (c *Client) evaluatePolicy(
 	evaluatedAt := c.now()
 
 	input := policy.Input{
-		SubjectDigest:           subject.ManifestDigest.String(),
+		SubjectDigest: subject.ManifestDigest.String(),
+		// The tree digest recomputed while verifying, so provenance claiming
+		// a different payload is caught rather than believed.
+		TreeDigest:              subject.TreeDigest.String(),
 		Format:                  subject.Config.Format,
 		SuppliedDigestReference: referenceWasDigest(req.Reference),
 		FileCount:               subject.Config.FileCount,

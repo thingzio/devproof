@@ -67,6 +67,13 @@ type RejectedEvidence struct {
 type Input struct {
 	// SubjectDigest is what is being verified.
 	SubjectDigest string
+	// TreeDigest is the payload identity that was recomputed while verifying.
+	//
+	// Present so that provenance claiming a different payload can be caught.
+	// A statement bound to this subject can still describe a tree that is not
+	// this one, and a signature says who wrote that claim rather than whether
+	// it is true.
+	TreeDigest string
 	// Format is the bundle format that was read.
 	Format bundle.Format
 	// SuppliedDigestReference reports whether the caller named a digest
@@ -302,12 +309,44 @@ func evaluateOneProvenance(rules ProvenanceRules, item VerifiedEvidence, input I
 
 	provenance := statement.Predicate.DevProof
 
-	if rules.RequireLockDigest && provenance.LockDigest == "" {
+	// Claims about this subject are checked against what verification
+	// actually established. Everything above proves the statement is bound to
+	// this artifact and was written by a known signer; none of it makes the
+	// statement true. A trusted signer publishing provenance that names a
+	// different payload or a different format is either mistaken or lying,
+	// and either way it is not a verified fact about this artifact.
+	if input.TreeDigest != "" && provenance.TreeDigest != "" &&
+		provenance.TreeDigest != input.TreeDigest {
+
 		report.AddFinding(Finding{
-			Code: FindingLockDigestRequired, Rule: "provenance.requireLockDigest",
+			Code: FindingProvenanceInconsistent, Rule: "provenance.treeDigest",
 			Severity: SeverityError, Subject: item.Digest,
-			Message: "the policy requires provenance to record a lock digest, and this does not",
+			Message: fmt.Sprintf("provenance claims tree digest %s, but this subject's "+
+				"payload is %s", provenance.TreeDigest, input.TreeDigest),
 		})
+	}
+	if provenance.FormatVersion != "" && input.Format != "" &&
+		provenance.FormatVersion != input.Format.String() {
+
+		report.AddFinding(Finding{
+			Code: FindingProvenanceInconsistent, Rule: "provenance.formatVersion",
+			Severity: SeverityError, Subject: item.Digest,
+			Message: fmt.Sprintf("provenance claims bundle format %q, but this subject "+
+				"was read as %q", provenance.FormatVersion, input.Format),
+		})
+	}
+
+	if rules.RequireLockDigest {
+		// A digest, not merely something. The rule exists so a build's inputs
+		// are auditable afterwards, and "yes" audits nothing.
+		if _, err := bundle.ParseDigest(provenance.LockDigest); err != nil {
+			report.AddFinding(Finding{
+				Code: FindingLockDigestRequired, Rule: "provenance.requireLockDigest",
+				Severity: SeverityError, Subject: item.Digest,
+				Message: fmt.Sprintf("the policy requires provenance to record a lock "+
+					"digest, and this records %q", provenance.LockDigest),
+			})
+		}
 	}
 
 	if len(rules.AllowedBuilders) > 0 {
@@ -321,9 +360,26 @@ func evaluateOneProvenance(rules ProvenanceRules, item VerifiedEvidence, input I
 		}
 	}
 
+	// Source restrictions used to be applied by looping over the sources a
+	// predicate claimed, so an empty list ran the loop zero times and the
+	// rules passed. Provenance asserting there were no sources is the one
+	// claim that must never satisfy a policy about where sources may come
+	// from.
+	if sourceRulesConfigured(rules.Sources) && len(provenance.Sources) == 0 {
+		report.AddFinding(Finding{
+			Code: FindingProvenanceInconsistent, Rule: "provenance.sources",
+			Severity: SeverityError, Subject: item.Digest,
+			Message: "the policy restricts sources, and this provenance records none",
+		})
+	}
 	for _, source := range provenance.Sources {
 		evaluateSource(rules.Sources, source, item.Digest, report)
 	}
+}
+
+func sourceRulesConfigured(rules SourceRules) bool {
+	return len(rules.AllowedTypes) > 0 || len(rules.AllowedHosts) > 0 ||
+		rules.RequireImmutableResolution
 }
 
 func evaluateSource(rules SourceRules, source evidence.SourceProvenance, evidenceDigest string, report *Report) {

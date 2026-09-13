@@ -137,6 +137,19 @@ Provenance policy may require:
 - absence of unapproved source types; and
 - a maximum evidence age when an authenticated time is available.
 
+Claims are cross-checked against what verification established. Provenance
+naming a tree digest or bundle format other than the subject's own is a
+finding, and `requireLockDigest` demands a syntactically valid digest rather
+than merely a non-empty field.
+
+A signature establishes who wrote a statement. It does not establish that the
+statement is true, and a trusted signer can still publish one that contradicts
+the artifact it is bound to. Malformed or internally contradictory assertions
+never become verified facts.
+
+Source rules cannot be satisfied vacuously either: a policy restricting source
+types or hosts is not met by provenance recording no sources at all.
+
 Source-location rules apply to provenance evidence, not to payload identity.
 Two attestations may truthfully describe different source histories for the
 same subject. Policy selects which history it is willing to trust.
@@ -194,6 +207,7 @@ signature-threshold-not-met
 signer-identity-not-allowed
 transparency-proof-required
 provenance-required
+provenance-inconsistent
 predicate-not-allowed
 builder-not-allowed
 lock-digest-required

@@ -134,3 +134,152 @@ func TestAcceptedIdentitiesAreDeduplicated(t *testing.T) {
 		t.Errorf("one signer is reported %d times: %v", count, report.AcceptedIdentities)
 	}
 }
+
+const (
+	subjectHex = "1111111111111111111111111111111111111111111111111111111111111111"
+	treeHex    = "2222222222222222222222222222222222222222222222222222222222222222"
+	otherHex   = "3333333333333333333333333333333333333333333333333333333333333333"
+	signerHex  = "4444444444444444444444444444444444444444444444444444444444444444"
+)
+
+// provenanceInput builds a verified-evidence input whose predicate the test
+// can shape.
+func provenanceInput(mutate func(*evidence.DevProofProvenance)) policy.Input {
+	claims := evidence.DevProofProvenance{
+		FormatVersion:  string(bundle.FormatV1),
+		ManifestDigest: "sha256:" + otherHex,
+		LockDigest:     "sha256:" + otherHex,
+		TreeDigest:     "sha256:" + treeHex,
+		Sources: []evidence.SourceProvenance{{
+			Name: "content", Type: "path", Resolver: "devproof.thingz.io/path/v1",
+			TreeDigest: "sha256:" + treeHex,
+		}},
+	}
+	if mutate != nil {
+		mutate(&claims)
+	}
+
+	statement := &evidence.Statement{
+		Type:          evidence.StatementType,
+		PredicateType: bundle.PredicateTypeProvenanceV1,
+		Subject: []evidence.Subject{{
+			Digest: map[string]string{"sha256": subjectHex},
+		}},
+		Predicate: evidence.Predicate{DevProof: claims},
+	}
+
+	return policy.Input{
+		SubjectDigest: "sha256:" + subjectHex,
+		TreeDigest:    "sha256:" + treeHex,
+		Format:        bundle.FormatV1,
+		Evidence: []policy.VerifiedEvidence{{
+			Digest:     "sha256:" + signerHex,
+			Statement:  statement,
+			Identities: []evidence.Identity{{KeyID: signerHex}},
+		}},
+	}
+}
+
+func provenancePolicy(mutate func(*policy.ProvenanceRules)) *policy.Document {
+	doc := &policy.Document{
+		APIVersion: bundle.APIVersionV1Alpha1,
+		Kind:       bundle.KindVerificationPolicy,
+		Metadata:   policy.Metadata{Name: "provenance"},
+		Spec: policy.Spec{
+			Signatures: policy.SignatureRules{
+				Threshold:  1,
+				Identities: []policy.IdentityRule{{KeyID: signerHex}},
+			},
+			Provenance: policy.ProvenanceRules{Required: true},
+		},
+	}
+	if mutate != nil {
+		mutate(&doc.Spec.Provenance)
+	}
+	return doc
+}
+
+// TestProvenanceClaimsAreBoundToTheSubject is the heart of R07.
+//
+// A signature establishes who wrote a statement. It says nothing about
+// whether the statement is true. The subject binding was checked, so evidence
+// could not be lifted onto a different artifact -- but the predicate's own
+// claims about that artifact were taken at face value.
+//
+// A trusted signer could therefore publish provenance correctly bound to this
+// subject while claiming a different tree digest or a different bundle
+// format, and policy would report it as verified. Malformed or internally
+// contradictory assertions must never become verified facts.
+func TestProvenanceClaimsAreBoundToTheSubject(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name   string
+		mutate func(*evidence.DevProofProvenance)
+	}{
+		{"tree digest", func(p *evidence.DevProofProvenance) {
+			p.TreeDigest = "sha256:" + otherHex
+		}},
+		{"format", func(p *evidence.DevProofProvenance) {
+			p.FormatVersion = "devproof-bundle-v99"
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			report := policy.Evaluate(provenancePolicy(nil), provenanceInput(tc.mutate))
+			if report.Trust == policy.StatusPass {
+				t.Errorf("provenance contradicting the subject's %s was accepted", tc.name)
+			}
+		})
+	}
+}
+
+// TestConsistentProvenanceIsAccepted guards against the check rejecting
+// everything.
+func TestConsistentProvenanceIsAccepted(t *testing.T) {
+	t.Parallel()
+
+	report := policy.Evaluate(provenancePolicy(nil), provenanceInput(nil))
+	if report.Trust != policy.StatusPass {
+		t.Errorf("consistent provenance was rejected: %v", report.Findings)
+	}
+}
+
+// TestRequireLockDigestWantsADigest covers a rule that accepted anything.
+//
+// requireLockDigest checked only that the field was non-empty, so the string
+// "yes" satisfied a policy asking a build to record what it was locked
+// against.
+func TestRequireLockDigestWantsADigest(t *testing.T) {
+	t.Parallel()
+
+	doc := provenancePolicy(func(r *policy.ProvenanceRules) { r.RequireLockDigest = true })
+	report := policy.Evaluate(doc, provenanceInput(func(p *evidence.DevProofProvenance) {
+		p.LockDigest = "yes"
+	}))
+	if report.Trust == policy.StatusPass {
+		t.Error("a lock digest of \"yes\" satisfied requireLockDigest")
+	}
+}
+
+// TestSourceRulesDoNotPassVacuously covers rules with nothing to apply to.
+//
+// Source restrictions were evaluated by looping over the sources a predicate
+// claimed. An empty list ran the loop zero times, so a policy restricting
+// source types and hosts was satisfied by provenance asserting there were no
+// sources at all -- the one claim that should never satisfy it.
+func TestSourceRulesDoNotPassVacuously(t *testing.T) {
+	t.Parallel()
+
+	doc := provenancePolicy(func(r *policy.ProvenanceRules) {
+		r.Sources.AllowedTypes = []string{"git"}
+		r.Sources.AllowedHosts = []string{"github.com"}
+	})
+	report := policy.Evaluate(doc, provenanceInput(func(p *evidence.DevProofProvenance) {
+		p.Sources = nil
+	}))
+	if report.Trust == policy.StatusPass {
+		t.Error("source restrictions were satisfied by provenance claiming no sources")
+	}
+}
