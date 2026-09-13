@@ -20,6 +20,7 @@ import (
 	"context"
 	stderrors "errors"
 	"log/slog"
+	"sync/atomic"
 	"time"
 
 	"github.com/thingzio/devproof/internal/oci"
@@ -53,7 +54,11 @@ type Client struct {
 	trustRoots [][]byte
 	clock      func() time.Time
 	offline    bool
-	closed     bool
+	// closed is atomic because Close may be called while an operation is in
+	// flight, and the type documents itself as safe for concurrent use. An
+	// ordinary bool made that claim false under the race detector for exactly
+	// the program that relied on it.
+	closed atomic.Bool
 }
 
 // Option configures a Client.
@@ -299,13 +304,23 @@ func WithLogger(logger *slog.Logger) Option {
 	}
 }
 
-// Close releases client-owned resources.
+// Close releases client-owned resources. It is idempotent.
 //
 // It does not remove artifacts, layouts, or output directories: those belong
 // to the caller, and a library that deleted them on shutdown would be
 // impossible to reason about.
+//
+// Closing while an operation is in flight is allowed and is not a data race,
+// but it does not wait: the operation either completes or fails, and which
+// one is a matter of timing. A caller that needs a definite answer finishes
+// its operations first.
 func (c *Client) Close() error {
-	c.closed = true
+	// Idempotent: a second call is a no-op rather than a second round of
+	// transport closes. `defer client.Close()` beside an explicit one is
+	// ordinary Go, and it closed every transport twice.
+	if !c.closed.CompareAndSwap(false, true) {
+		return nil
+	}
 
 	var errs []error
 	for scheme, transport := range c.transports {
@@ -318,7 +333,7 @@ func (c *Client) Close() error {
 }
 
 func (c *Client) checkOpen() error {
-	if c.closed {
+	if c.closed.Load() {
 		return fault.New(fault.CodeInvalidInput, clientOp, "client is closed")
 	}
 	return nil
