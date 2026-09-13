@@ -31,11 +31,14 @@ bin/
 # =============================================================================
 dist/
 
-# The shared release workflow (thingzio/actions release-go.yaml) checks itself
-# out here, inside the workspace, because its Build job runs a local composite
-# action and local actions must live under GITHUB_WORKSPACE. goreleaser refuses
-# to build from a tree with untracked files, so without this the release fails
-# with "git is in a dirty state: ?? .builder/" before producing anything.
+# Where the shared release workflow (thingzio/actions release-go.yaml) checks
+# itself out -- inside the workspace, because its Build job runs a local
+# composite action and those must live under GITHUB_WORKSPACE. goreleaser
+# refuses to build from a tree with untracked files.
+#
+# Redundant as of release-go v1.7.1, which adds /.builder/ to .git/info/exclude
+# itself. Kept as a cheap guard: this costs one line and still holds if the pin
+# is ever rolled back to a version without that fix.
 .builder/
 
 # Ko

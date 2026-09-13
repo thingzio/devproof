@@ -92,7 +92,7 @@ jobs:
       # receives it, and that job runs no code from this repository.
       id-token: write
       attestations: write
-    uses: thingzio/actions/.github/workflows/release-go.yaml@bb66805bb85b2d5cdf8cbae68b67ebe9bf059892  # v1.7.0
+    uses: thingzio/actions/.github/workflows/release-go.yaml@368b3e12df4c41d9079b26e41a03efcd90461d56  # v1.7.1
     with:
       # Passed explicitly, not inherited. v1.7.0 changed this input's default
       # from .go-version to go.mod; both say 1.27.1 here so the result is the

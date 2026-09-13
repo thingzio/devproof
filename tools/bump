@@ -37,8 +37,13 @@ bump_version() {
 		err "Local branch is behind origin. Pull before bumping version."
 	fi
 
+	# --exclude='*-*' skips prerelease tags. RELEASING.md tells you to cut an rc
+	# before any release that changes the pipeline, and without this the very
+	# next `make bump-*` reports v0.4.0-rc.2 as the current version, fails the
+	# semver check below, and refuses to tag -- the documented workflow breaking
+	# the tool that implements it.
 	local current_version
-	current_version=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+	current_version=$(git describe --tags --abbrev=0 --exclude='*-*' 2>/dev/null || echo "v0.0.0")
 
 	msg "Current version: $current_version"
 
