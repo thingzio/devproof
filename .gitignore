@@ -31,6 +31,13 @@ bin/
 # =============================================================================
 dist/
 
+# The shared release workflow (thingzio/actions release-go.yaml) checks itself
+# out here, inside the workspace, because its Build job runs a local composite
+# action and local actions must live under GITHUB_WORKSPACE. goreleaser refuses
+# to build from a tree with untracked files, so without this the release fails
+# with "git is in a dirty state: ?? .builder/" before producing anything.
+.builder/
+
 # Ko
 .digest
 
