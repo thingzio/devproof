@@ -122,6 +122,11 @@
           "items": {
             "type": "string"
           }
+        },
+        "resolverVersion": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The resolver implementation's version. A resolver whose behaviour changed cannot silently satisfy a lock an earlier one made, and its name does not change when its behaviour does."
         }
       }
     },

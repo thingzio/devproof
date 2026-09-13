@@ -59,10 +59,16 @@ type Lock struct {
 type LockedSource struct {
 	Name string `json:"name"`
 	Type string `json:"type"`
-	// Resolver identifies the implementation and version that produced this
-	// resolution, so a resolver whose behavior changed cannot silently
-	// satisfy a lock made by an earlier one.
+	// Resolver identifies the implementation that produced this resolution.
 	Resolver string `json:"resolver"`
+	// ResolverVersion is that implementation's version.
+	//
+	// Recorded separately because the point of naming a resolver is that one
+	// whose behavior changed cannot silently satisfy a lock an earlier one
+	// made -- and the name alone does not change when the behavior does. It
+	// was being verified during resolution and then dropped on the way to the
+	// lock, which left the comment above describing something nothing stored.
+	ResolverVersion string `json:"resolverVersion,omitempty"`
 
 	// Requested is what the manifest asked for, which may be mutable.
 	Requested map[string]any `json:"requested,omitempty"`

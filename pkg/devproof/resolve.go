@@ -114,6 +114,53 @@ func (c *Client) resolveSpec(
 	return result, nil
 }
 
+// verifyMaterial checks a snapshot's account of itself against what the core
+// already knows.
+//
+// The registry looked this resolver up by the manifest's source type and
+// called it, so the type, the resolver name, and the version are facts here.
+// They were nonetheless taken from whatever the returned snapshot claimed,
+// and Identity() was never called at all -- so a resolver could attribute its
+// output to a different one, in the lock and in signed provenance, with
+// nothing comparing the two.
+//
+// The contribution digest gets the same treatment. It identifies what a
+// source actually provided and it went straight into the lock, derived from
+// nothing: rederiving it from the records the snapshot returned costs one
+// pass over data already in memory.
+func verifyMaterial(resolver source.Resolver, declared bundle.SourceSpec, snapshot source.Snapshot) error {
+	material := snapshot.Material()
+	identity := resolver.Identity()
+
+	if material.Type != declared.Type {
+		return fault.New(fault.CodeSourceResolution, resolveOp,
+			fmt.Sprintf("the resolver for %q returned material claiming source type %q",
+				declared.Type, material.Type)).WithSource(declared.Name)
+	}
+	if material.Resolver.Name != identity.Name {
+		return fault.New(fault.CodeSourceResolution, resolveOp,
+			fmt.Sprintf("resolver %q returned material attributed to %q",
+				identity.Name, material.Resolver.Name)).WithSource(declared.Name)
+	}
+	if material.Resolver.Version != identity.Version {
+		return fault.New(fault.CodeSourceResolution, resolveOp,
+			fmt.Sprintf("resolver %q returned material claiming version %q, not %q",
+				identity.Name, material.Resolver.Version, identity.Version)).
+			WithSource(declared.Name)
+	}
+
+	derived, err := canonical.TreeDigest(snapshot.Records())
+	if err != nil {
+		return err
+	}
+	if derived != material.TreeDigest {
+		return fault.New(fault.CodeDigestMismatch, resolveOp,
+			fmt.Sprintf("the resolver reported contribution digest %s, but its records "+
+				"hash to %s", material.TreeDigest, derived)).WithSource(declared.Name)
+	}
+	return nil
+}
+
 // resolveSources runs the resolvers under a concurrency bound.
 //
 // On the first failure the group cancels the rest, so a manifest with one bad
@@ -180,6 +227,13 @@ func (c *Client) resolveSources(
 				return err
 			}
 
+			if err := verifyMaterial(resolver, declared, snapshot); err != nil {
+				if closeErr := snapshot.Close(); closeErr != nil {
+					return joinNonNil([]error{err, closeErr})
+				}
+				return err
+			}
+
 			mu.Lock()
 			defer mu.Unlock()
 			snapshots[declared.Name] = snapshot
@@ -215,15 +269,16 @@ func (r *resolution) buildLock(treeDigest canonical.Digest) (*bundle.Lock, error
 			return nil, err
 		}
 		sources = append(sources, bundle.LockedSource{
-			Name:       declared.Name,
-			Type:       material.Type,
-			Resolver:   material.Resolver.Name,
-			Requested:  material.Requested,
-			Resolved:   material.Resolved,
-			TreeDigest: material.TreeDigest.String(),
-			MountPath:  mount,
-			Include:    declared.Include,
-			Exclude:    declared.Exclude,
+			Name:            declared.Name,
+			Type:            material.Type,
+			Resolver:        material.Resolver.Name,
+			ResolverVersion: material.Resolver.Version,
+			Requested:       material.Requested,
+			Resolved:        material.Resolved,
+			TreeDigest:      material.TreeDigest.String(),
+			MountPath:       mount,
+			Include:         declared.Include,
+			Exclude:         declared.Exclude,
 		})
 	}
 

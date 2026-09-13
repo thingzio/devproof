@@ -198,6 +198,7 @@ structural contract is:
       "name": "application",
       "type": "git",
       "resolver": "devproof.thingz.io/git/v1",
+      "resolverVersion": "1",
       "requested": {
         "url": "https://github.com/example/application.git",
         "ref": "main",
