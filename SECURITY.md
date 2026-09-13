@@ -17,9 +17,13 @@ otherwise.
 
 ## Supported versions
 
-DevProof is pre-release. Until the first tagged release, only `main` receives
-fixes. Once releases begin, this section will name the supported minor
-versions and their support window.
+Only the latest release receives fixes, and until 1.0 a fix ships as a new
+patch or minor version rather than being backported. There is no yank
+mechanism: a defective release is superseded, never withdrawn, because
+something may already have consumed it.
+
+Until 1.0 this is deliberately a narrow promise. Pin exactly if you depend on
+this.
 
 ## Scope
 

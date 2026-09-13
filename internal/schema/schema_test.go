@@ -27,6 +27,7 @@ import (
 
 	"github.com/santhosh-tekuri/jsonschema/v6"
 
+	"github.com/thingzio/devproof/internal/repo"
 	"github.com/thingzio/devproof/internal/schema"
 	"github.com/thingzio/devproof/pkg/bundle"
 	"github.com/thingzio/devproof/pkg/policy"
@@ -480,7 +481,7 @@ func TestInitTemplateValidatesAgainstTheSchema(t *testing.T) {
 func TestGoldenConfigValidates(t *testing.T) {
 	t.Parallel()
 
-	golden := filepath.Join(schema.RepoRoot(),
+	golden := filepath.Join(repo.Root(),
 		"internal", "canonical", "testdata", "format", "v1", "config.json")
 	data, err := os.ReadFile(golden)
 	if err != nil {

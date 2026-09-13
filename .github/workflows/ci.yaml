@@ -128,7 +128,7 @@ jobs:
           echo "want ${want}, got ${got}"
           test "${want}" = "${got}"
       - name: test
-        run: make cover
+        run: make cover-check
       - name: upload coverage
         if: matrix.os == 'ubuntu-latest'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
@@ -209,6 +209,38 @@ jobs:
       # exists to prevent.
       - name: govulncheck
         run: make vuln
+
+  # Seed corpora already run under `make test`, deterministically. This job is
+  # the part that was never running anywhere: actual fuzzing, which is the only
+  # way a target finds an input nobody thought to write down.
+  #
+  # A failure here is a real defect rather than flakiness. Extraction is the
+  # one place DevProof parses bytes it did not produce and has not yet proven
+  # anything about, and a panic there is a denial of service in any process
+  # embedding the SDK.
+  fuzz:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        with:
+          go-version-file: .go-version
+          check-latest: true
+      - name: fuzz smoke
+        run: make fuzz
+      # A crash leaves its input under testdata/fuzz. Keeping it is what turns
+      # one unlucky CI run into a permanent regression test.
+      - name: upload any crashers
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: fuzz-crashers
+          path: |
+            **/testdata/fuzz/**
+          if-no-files-found: ignore
 
   build:
     runs-on: ubuntu-latest

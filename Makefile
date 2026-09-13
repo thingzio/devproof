@@ -127,13 +127,23 @@ cover: ## Run tests and write a coverage profile
 cover-html: cover ## Render the coverage profile as HTML
 	go tool cover -html=$(COVERAGE_FILE) -o coverage.html
 
+# Backslash continuations rather than relying on .ONESHELL. macOS ships GNU
+# Make 3.81, which predates .ONESHELL (3.82) and ignores it silently, so this
+# recipe ran one line per shell and died on `for ... do` with no body. It
+# worked on CI's newer make and failed on a maintainer's laptop, which is the
+# exact split .versions.yaml exists to prevent. Joined into one line, it runs
+# the same everywhere.
+#
+# FUZZTIME is overridable so a scheduled campaign can run long without a
+# second target drifting out of step with this one.
 .PHONY: fuzz
 fuzz: ## Run every fuzz target briefly as a smoke check
-	@for pkg in $$(go list ./... ); do
-	  for target in $$(go test -list 'Fuzz.*' $$pkg 2>/dev/null | grep '^Fuzz' || true); do
-	    echo "==> $$pkg $$target"
-	    go test -run '^$$' -fuzz "^$${target}$$" -fuzztime 30s $$pkg
-	  done
+	@set -euo pipefail; \
+	for pkg in $$(go list ./...); do \
+	  for target in $$(go test -list 'Fuzz.*' $$pkg 2>/dev/null | grep '^Fuzz' || true); do \
+	    echo "==> $$pkg $$target"; \
+	    go test -run '^$$' -fuzz "^$${target}$$" -fuzztime "$${FUZZTIME:-30s}" $$pkg; \
+	  done; \
 	done
 
 # Golden bytes are a compatibility surface (DP-015). This target is the one

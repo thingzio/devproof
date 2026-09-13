@@ -35,7 +35,7 @@ jobs:
           go-version-file: .go-version
           check-latest: true
       - name: test
-        run: make cover
+        run: make cover-check
       - name: conformance
         # The independent reader, run against the tagged tree. It shares no
         # code with the writer, so this is the check that the artifact matches

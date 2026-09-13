@@ -5,7 +5,8 @@
 # paths can reissue the identity of every artifact DevProof has produced, so
 # they are called out separately rather than relying on the catch-all.
 /internal/canonical/ @mchmarny
-/bundle/format.go @mchmarny
+/pkg/bundle/format.go @mchmarny
+/schemas/ @mchmarny
 /docs/bundle-format.md @mchmarny
 /docs/decisions.md @mchmarny
 
@@ -19,7 +20,7 @@
 # verification pipeline.
 /internal/safefs/ @mchmarny
 /internal/oci/ @mchmarny
-/policy/ @mchmarny
+/pkg/policy/ @mchmarny
 
 # Supply chain and release plumbing.
 /.github/ @mchmarny

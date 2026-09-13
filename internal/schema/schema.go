@@ -29,8 +29,9 @@
 package schema
 
 import (
-	"os"
 	"path/filepath"
+
+	"github.com/thingzio/devproof/internal/repo"
 )
 
 // Schema file names, relative to the schemas/ directory.
@@ -47,30 +48,6 @@ func All() []string {
 }
 
 // Path returns the path of one schema file.
-//
-// The repository root is found by walking up from the working directory to
-// the directory holding go.mod. runtime.Caller would be the obvious way to
-// locate a file relative to this source, but it reports a trimmed module path
-// rather than a filesystem path under this repository's build flags, which
-// produces a path that does not exist.
 func Path(name string) string {
-	return filepath.Join(RepoRoot(), "schemas", name)
-}
-
-// RepoRoot returns the directory holding go.mod, or "." if none is found.
-func RepoRoot() string {
-	dir, err := os.Getwd()
-	if err != nil {
-		return "."
-	}
-	for {
-		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
-			return dir
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			return "."
-		}
-		dir = parent
-	}
+	return filepath.Join(repo.Root(), "schemas", name)
 }
