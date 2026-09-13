@@ -24,6 +24,7 @@ import (
 	"crypto/sha256"
 	stderrors "errors"
 	"fmt"
+	"hash"
 	"io"
 	"os"
 	"path/filepath"
@@ -44,6 +45,16 @@ type ExtractOptions struct {
 	Config *bundle.Config
 	// Limits bounds the expansion.
 	Limits bundle.Limits
+	// LayerDigest is the compressed layer's digest from the OCI descriptor.
+	//
+	// Checking every decoded entry against the inventory is not the same
+	// claim as checking the bytes. A differently compressed archive holding
+	// exactly the declared files satisfies every entry check and is still not
+	// the layer the subject names, so identity has to be established over the
+	// compressed stream itself.
+	LayerDigest canonical.Digest
+	// LayerSize is the compressed layer's size from the OCI descriptor.
+	LayerSize int64
 }
 
 // ExtractResult reports what was published.
@@ -108,11 +119,13 @@ func Extract(ctx context.Context, layer io.Reader, opts ExtractOptions) (_ *Extr
 	}()
 
 	extractor := &extractor{
-		ctx:      ctx,
-		root:     staging.Root(),
-		limits:   limits,
-		expected: inventoryIndex(opts.Config),
-		buf:      make([]byte, copyBufferSize),
+		ctx:           ctx,
+		root:          staging.Root(),
+		limits:        limits,
+		expected:      inventoryIndex(opts.Config),
+		buf:           make([]byte, copyBufferSize),
+		expectDigest:  opts.LayerDigest,
+		expectedBytes: opts.LayerSize,
 	}
 	if err := extractor.run(layer); err != nil {
 		return nil, err
@@ -155,6 +168,59 @@ func Extract(ctx context.Context, layer io.Reader, opts ExtractOptions) (_ *Extr
 	}, nil
 }
 
+// VerifyLayerOptions configures a validate-only pass over a layer.
+type VerifyLayerOptions struct {
+	// Config is the inventory the layer must match exactly.
+	Config *bundle.Config
+	// Limits bounds the work.
+	Limits bundle.Limits
+	// LayerDigest and LayerSize come from the OCI layer descriptor.
+	LayerDigest canonical.Digest
+	LayerSize   int64
+}
+
+// VerifyLayerResult reports what a validate-only pass observed.
+type VerifyLayerResult struct {
+	FileCount  int64
+	TotalBytes int64
+}
+
+// VerifyLayer streams a layer and checks it without writing anything.
+//
+// It runs the identical checks Extract runs — compressed identity, gzip
+// framing, path canonicalization, inventory agreement, per-entry size and
+// content digests, and every limit — and differs only in having nowhere to
+// put the bytes. Sharing one implementation is the point: a verifier that
+// checked less than the extractor would report a pass the extractor then
+// refused, and a verifier that checked differently would eventually disagree
+// with it about something subtler.
+func VerifyLayer(ctx context.Context, layer io.Reader, opts VerifyLayerOptions) (*VerifyLayerResult, error) {
+	if opts.Config == nil {
+		return nil, fault.New(fault.CodeInternal, extractOp,
+			"verification requires a config inventory")
+	}
+
+	verifier := &extractor{
+		ctx:           ctx,
+		root:          nil, // validate-only
+		limits:        opts.Limits.WithDefaults(),
+		expected:      inventoryIndex(opts.Config),
+		buf:           make([]byte, copyBufferSize),
+		expectDigest:  opts.LayerDigest,
+		expectedBytes: opts.LayerSize,
+	}
+	if err := verifier.run(layer); err != nil {
+		return nil, err
+	}
+	if err := verifier.verifyInventoryComplete(); err != nil {
+		return nil, err
+	}
+	return &VerifyLayerResult{
+		FileCount:  int64(len(verifier.seen)),
+		TotalBytes: verifier.totalBytes,
+	}, nil
+}
+
 func inventoryIndex(cfg *bundle.Config) map[string]bundle.ConfigFile {
 	index := make(map[string]bundle.ConfigFile, len(cfg.Files))
 	for _, file := range cfg.Files {
@@ -174,13 +240,31 @@ type extractor struct {
 	directories  map[string]struct{}
 	totalBytes   int64
 	compressedIn int64
+
+	// expectDigest and expectedBytes come from the OCI layer descriptor. A
+	// zero digest means the caller has no descriptor to check against, which
+	// is only true for tests that construct a layer directly.
+	expectDigest  canonical.Digest
+	expectedBytes int64
 }
+
+// writes reports whether this run publishes anything.
+//
+// A nil root is validate-only: every check still runs and every byte is still
+// hashed, but nothing is created. It is the same code path Verify and Expand
+// both need, and keeping it one path is what stops the two from disagreeing
+// about what "integrity" means.
+func (e *extractor) writes() bool { return e.root != nil }
 
 func (e *extractor) run(layer io.Reader) error {
 	e.seen = make(map[string]struct{}, len(e.expected))
 	e.directories = make(map[string]struct{})
 
-	counted := &countingReader{r: layer}
+	// The compressed stream is hashed as it is consumed, before gzip sees it,
+	// so the digest covers exactly the bytes that arrived rather than
+	// anything reconstructed afterwards.
+	layerHash := sha256.New()
+	counted := &countingReader{r: io.TeeReader(layer, layerHash)}
 	buffered := bufio.NewReader(counted)
 
 	gzipReader, err := gzip.NewReader(buffered)
@@ -238,7 +322,39 @@ func (e *extractor) run(layer io.Reader) error {
 	}
 
 	e.compressedIn = counted.n
+	if err := e.verifyLayerIdentity(layerHash); err != nil {
+		return err
+	}
 	return e.checkCompressionRatio()
+}
+
+// verifyLayerIdentity compares the consumed stream against its descriptor.
+//
+// Checked after the archive has been read rather than before, because the
+// digest is only known once the last byte has passed through, and buffering
+// the layer to check it first would make memory track payload size (DP-033).
+// Nothing has been published at this point: files are written owner-only into
+// a private staging directory and are only made visible by the exclusive
+// rename that happens after this returns.
+func (e *extractor) verifyLayerIdentity(hasher hash.Hash) error {
+	if e.expectDigest == (canonical.Digest{}) {
+		return nil
+	}
+
+	if e.expectedBytes > 0 && e.compressedIn != e.expectedBytes {
+		return fault.New(fault.CodeDigestMismatch, extractOp,
+			fmt.Sprintf("layer is %d compressed bytes, the descriptor declares %d",
+				e.compressedIn, e.expectedBytes))
+	}
+
+	var observed canonical.Digest
+	hasher.Sum(observed[:0])
+	if observed != e.expectDigest {
+		return fault.New(fault.CodeDigestMismatch, extractOp,
+			fmt.Sprintf("layer content is %s, the descriptor declares %s",
+				observed, e.expectDigest))
+	}
+	return nil
 }
 
 func (e *extractor) checkCompressionRatio() error {
@@ -292,6 +408,9 @@ func (e *extractor) directory(name string) error {
 	if err := e.ensureNodeBudget(); err != nil {
 		return err
 	}
+	if !e.writes() {
+		return nil
+	}
 	return mkdirAllIn(e.root, storagePath(validated))
 }
 
@@ -315,31 +434,37 @@ func (e *extractor) file(r io.Reader, name string) (retErr error) {
 		return budgetErr
 	}
 
-	target := storagePath(validated)
-	if mkdirErr := mkdirAllIn(e.root, filepath.Dir(target)); mkdirErr != nil {
-		return mkdirErr
-	}
-
-	// O_EXCL, and no O_NOFOLLOW needed: os.Root resolves every component
-	// against a held directory handle and refuses to traverse a symlink out
-	// of the staging tree. Mode 0600 while the content is unverified.
-	dest, err := e.root.OpenFile(target, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
-	if err != nil {
-		if os.IsExist(err) {
-			return fault.New(fault.CodeInvalidArtifact, extractOp,
-				"layer entry conflicts with something already extracted").WithPath(key)
+	// Validate-only still hashes every byte; it just has nowhere to put them.
+	sink := io.Discard
+	if e.writes() {
+		target := storagePath(validated)
+		if mkdirErr := mkdirAllIn(e.root, filepath.Dir(target)); mkdirErr != nil {
+			return mkdirErr
 		}
-		return fault.Wrap(fault.CodeInternal, extractOp, "creating extracted file", err).WithPath(key)
-	}
-	defer func() {
-		if closeErr := dest.Close(); closeErr != nil && retErr == nil {
-			retErr = fault.Wrap(fault.CodeInternal, extractOp, "closing extracted file", closeErr).
+
+		// O_EXCL, and no O_NOFOLLOW needed: os.Root resolves every component
+		// against a held directory handle and refuses to traverse a symlink
+		// out of the staging tree. Mode 0600 while the content is unverified.
+		dest, openErr := e.root.OpenFile(target, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+		if openErr != nil {
+			if os.IsExist(openErr) {
+				return fault.New(fault.CodeInvalidArtifact, extractOp,
+					"layer entry conflicts with something already extracted").WithPath(key)
+			}
+			return fault.Wrap(fault.CodeInternal, extractOp, "creating extracted file", openErr).
 				WithPath(key)
 		}
-	}()
+		defer func() {
+			if closeErr := dest.Close(); closeErr != nil && retErr == nil {
+				retErr = fault.Wrap(fault.CodeInternal, extractOp,
+					"closing extracted file", closeErr).WithPath(key)
+			}
+		}()
+		sink = dest
+	}
 
 	hasher := sha256.New()
-	written, err := copyWithContext(e.ctx, io.MultiWriter(dest, hasher), r, e.buf)
+	written, err := copyWithContext(e.ctx, io.MultiWriter(sink, hasher), r, e.buf)
 	if err != nil {
 		if ctxErr := fault.FromContext(e.ctx, extractOp, "extraction canceled"); ctxErr != nil {
 			return ctxErr

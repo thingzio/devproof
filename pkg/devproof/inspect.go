@@ -210,10 +210,13 @@ func (c *Client) Inspect(ctx context.Context, req InspectRequest) (*InspectResul
 }
 
 func (c *Client) inspectSubject(ctx context.Context, req InspectRequest) (*InspectResult, error) {
+	// metadataOnly: inspect reports what an artifact says about itself and
+	// marks every fact with how it was established. It makes no integrity
+	// claim, so it does not pay for the payload.
 	subject, pinned, err := c.loadSubject(ctx, VerifyRequest{
 		Reference: req.Reference,
 		Limits:    req.Limits,
-	})
+	}, metadataOnly)
 	if err != nil {
 		return nil, err
 	}

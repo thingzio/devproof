@@ -268,10 +268,13 @@ func (c *Client) diffFromBundle(
 	limits Limits,
 ) (*DiffSide, []bundle.ConfigFile, error) {
 
+	// checkPayload, because "identical" is an integrity claim. Comparing
+	// config inventories alone would compare what two artifacts say about
+	// themselves, which is a weaker statement than the output implies.
 	subject, pinned, err := c.loadSubject(ctx, VerifyRequest{
 		Reference: reference,
 		Limits:    limits,
-	})
+	}, checkPayload)
 	if err != nil {
 		return nil, nil, err
 	}

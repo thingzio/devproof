@@ -572,22 +572,16 @@ func (c *Client) Verify(ctx context.Context, req VerifyRequest) (*policy.Report,
 		req.RequireDigest = true
 	}
 
-	subject, pinned, err := c.loadSubject(ctx, req)
+	subject, pinned, err := c.loadSubject(ctx, req, checkPayload)
 	if err != nil {
 		return nil, err
 	}
 
 	if !havePolicy {
-		report := &policy.Report{
-			Integrity:     policy.StatusPass,
-			Trust:         policy.StatusNotEvaluated,
-			Semantics:     policy.StatusNotEvaluated,
-			SubjectDigest: subject.ManifestDigest.String(),
-			TreeDigest:    subject.TreeDigest.String(),
-			Format:        subject.Config.Format.String(),
-			FileCount:     subject.Config.FileCount,
-			TotalBytes:    subject.Config.TotalSize,
-		}
+		// Pass, and it now means something: loadSubject streamed the layer,
+		// matched it against its descriptor, and checked every entry against
+		// the inventory before returning.
+		report := integrityReport(subject, policy.StatusPass)
 		report.AddFinding(policy.Finding{
 			Code:     policy.FindingPolicyNotSupplied,
 			Severity: policy.SeverityWarning,
@@ -761,21 +755,15 @@ func (c *Client) Expand(ctx context.Context, req ExpandRequest) (_ *ExpandResult
 		verification.RequireDigest = true
 	}
 
-	subject, pinned, err := c.loadSubject(ctx, verification)
+	subject, pinned, err := c.loadSubject(ctx, verification, metadataOnly)
 	if err != nil {
 		return nil, err
 	}
 
-	report := &policy.Report{
-		Integrity:     policy.StatusPass,
-		Trust:         policy.StatusNotEvaluated,
-		Semantics:     policy.StatusNotEvaluated,
-		SubjectDigest: subject.ManifestDigest.String(),
-		TreeDigest:    subject.TreeDigest.String(),
-		Format:        subject.Config.Format.String(),
-		FileCount:     subject.Config.FileCount,
-		TotalBytes:    subject.Config.TotalSize,
-	}
+	// Integrity is deliberately not yet pass: the payload has not been read.
+	// Expansion establishes it while streaming, and it is set below only once
+	// the extractor has returned.
+	report := integrityReport(subject, policy.StatusNotEvaluated)
 	if havePolicy {
 		report, err = c.evaluatePolicy(ctx, doc, subject, pinned, verification)
 		if err != nil {
@@ -806,10 +794,16 @@ func (c *Client) Expand(ctx context.Context, req ExpandRequest) (_ *ExpandResult
 		}
 	}()
 
+	// The layer descriptor goes with it: extraction checks every decoded entry
+	// against the inventory, which a differently encoded archive of the same
+	// files satisfies, so identity has to be established over the compressed
+	// bytes as they stream past.
 	result, err := safefs.Extract(ctx, layer, safefs.ExtractOptions{
 		Destination: req.Destination,
 		Config:      subject.Config,
 		Limits:      limits.Limits,
+		LayerDigest: subject.LayerDigest,
+		LayerSize:   subject.LayerSize,
 	})
 	if err != nil {
 		return nil, err
@@ -820,30 +814,73 @@ func (c *Client) Expand(ctx context.Context, req ExpandRequest) (_ *ExpandResult
 		"destination", result.Destination,
 		"files", result.FileCount)
 
+	// Integrity is established now, not earlier: the extractor has streamed
+	// the layer, matched it against its descriptor, and checked every entry
+	// against the inventory.
+	//
+	// The report returned is the one that was evaluated. Building a fresh one
+	// here discarded the policy digest, the accepted identities, the evidence
+	// storage mode, the evaluation time, and every finding, and reported
+	// trust as not-evaluated for an expansion that a policy had just gated.
+	// The gate was closed; the answer about it was false.
+	report.Integrity = policy.StatusPass
+
 	return &ExpandResult{
 		Destination:   result.Destination,
 		SubjectDigest: subject.ManifestDigest.String(),
 		TreeDigest:    subject.TreeDigest.String(),
 		FileCount:     result.FileCount,
 		TotalBytes:    result.TotalBytes,
-		Verification: &policy.Report{
-			Integrity:     policy.StatusPass,
-			Trust:         policy.StatusNotEvaluated,
-			Semantics:     policy.StatusNotEvaluated,
-			SubjectDigest: subject.ManifestDigest.String(),
-			TreeDigest:    subject.TreeDigest.String(),
-			Format:        subject.Config.Format.String(),
-			FileCount:     subject.Config.FileCount,
-			TotalBytes:    subject.Config.TotalSize,
-		},
+		Verification:  report,
 	}, nil
 }
+
+// integrityReport builds the facts every verification result starts from.
+//
+// One constructor for Verify and Expand, because the two had drifted: they
+// each assembled a report by hand and only one of them carried what a policy
+// evaluation had established.
+func integrityReport(subject *canonical.Subject, integrity policy.Status) *policy.Report {
+	return &policy.Report{
+		Integrity:     integrity,
+		Trust:         policy.StatusNotEvaluated,
+		Semantics:     policy.StatusNotEvaluated,
+		SubjectDigest: subject.ManifestDigest.String(),
+		TreeDigest:    subject.TreeDigest.String(),
+		Format:        subject.Config.Format.String(),
+		FileCount:     subject.Config.FileCount,
+		TotalBytes:    subject.Config.TotalSize,
+	}
+}
+
+// payloadCheck says whether a subject load must also read the payload.
+//
+// It is an explicit argument rather than a default because the two answers
+// are both correct for different callers, and a silent default would make one
+// of them wrong. Metadata-only is an honest, cheap answer to "what does this
+// artifact say about itself"; it is not an answer to "are these the bytes".
+type payloadCheck bool
+
+const (
+	// checkPayload fetches and hashes the layer. Required before any claim
+	// about integrity.
+	checkPayload payloadCheck = true
+	// metadataOnly reads the manifest and config and stops. Valid only where
+	// the caller either makes no integrity claim, or verifies the payload
+	// itself afterwards.
+	metadataOnly payloadCheck = false
+)
 
 // loadSubject resolves a reference and verifies the subject's integrity.
 //
 // The returned reference is pinned to a digest, so every caller works from
 // content rather than from a name that could change underneath it.
-func (c *Client) loadSubject(ctx context.Context, req VerifyRequest) (*canonical.Subject, artifact.Reference, error) {
+func (c *Client) loadSubject(
+	ctx context.Context,
+	req VerifyRequest,
+	payload payloadCheck,
+) (*canonical.Subject, artifact.Reference, error) {
+
 	if req.Reference == "" {
 		return nil, artifact.Reference{}, fault.New(fault.CodeInvalidInput, "verify",
 			"a reference is required")
@@ -870,7 +907,7 @@ func (c *Client) loadSubject(ctx context.Context, req VerifyRequest) (*canonical
 	}
 
 	limits := c.effectiveLimits(req.Limits)
-	return c.fetchSubject(ctx, transport, ref, limits.Limits)
+	return c.fetchSubject(ctx, transport, ref, limits.Limits, payload)
 }
 
 // layerSource supplies the layer bytes for publication.
@@ -1029,7 +1066,7 @@ func (c *Client) Copy(ctx context.Context, req CopyRequest) (_ *CopyResult, retE
 		Reference:     req.Source,
 		RequireDigest: req.RequireDigest,
 		Limits:        req.Limits,
-	})
+	}, checkPayload)
 	if err != nil {
 		return nil, err
 	}

@@ -24,6 +24,7 @@ import (
 
 	"github.com/thingzio/devproof/internal/canonical"
 	"github.com/thingzio/devproof/internal/oci"
+	"github.com/thingzio/devproof/internal/safefs"
 	"github.com/thingzio/devproof/pkg/artifact"
 	"github.com/thingzio/devproof/pkg/bundle"
 	"github.com/thingzio/devproof/pkg/fault"
@@ -169,6 +170,7 @@ func (c *Client) fetchSubject(
 	transport artifact.Transport,
 	ref artifact.Reference,
 	limits bundle.Limits,
+	payload payloadCheck,
 ) (*canonical.Subject, artifact.Reference, error) {
 
 	if err := fault.FromContext(ctx, transportOp, "verification canceled"); err != nil {
@@ -214,7 +216,52 @@ func (c *Client) fetchSubject(
 	if err != nil {
 		return nil, pinned, err
 	}
+
+	// VerifySubject establishes that the manifest and config agree with each
+	// other and with the manifest's own layer descriptor. That is a claim
+	// about metadata: every value it compares came out of the same manifest.
+	// Until the layer itself is read, nothing here has looked at the payload,
+	// and a subject whose layer is absent, altered, or differently encoded
+	// satisfies all of it.
+	if payload == checkPayload {
+		if err := c.verifyPayload(ctx, transport, pinned, subject, limits); err != nil {
+			return nil, pinned, err
+		}
+	}
 	return subject, pinned, nil
+}
+
+// verifyPayload streams the layer and checks it against its descriptor and
+// the config inventory.
+//
+// Streamed rather than buffered: the layer is the one blob that can exceed
+// memory, and DP-033 makes independence from payload size a correctness
+// property rather than a performance one.
+func (c *Client) verifyPayload(
+	ctx context.Context,
+	transport artifact.Transport,
+	pinned artifact.Reference,
+	subject *canonical.Subject,
+	limits bundle.Limits,
+) (retErr error) {
+
+	layer, err := transport.Fetch(ctx, pinned, subject.LayerDescriptor())
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if closeErr := layer.Close(); closeErr != nil && retErr == nil {
+			retErr = fault.Wrap(fault.CodeInternal, transportOp, "closing the layer blob", closeErr)
+		}
+	}()
+
+	_, err = safefs.VerifyLayer(ctx, layer, safefs.VerifyLayerOptions{
+		Config:      subject.Config,
+		Limits:      limits,
+		LayerDigest: subject.LayerDigest,
+		LayerSize:   subject.LayerSize,
+	})
+	return err
 }
 
 // fetchBlob reads a blob and verifies it against its descriptor.
