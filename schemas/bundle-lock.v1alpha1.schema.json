@@ -1,0 +1,166 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://devproof.thingz.io/schemas/bundle-lock.v1alpha1.schema.json",
+  "title": "DevProof bundle lock",
+  "description": "A lock records the immutable resolution of one manifest. It is generated, never hand-written, and it is what makes a build reproducible: a locked build fails rather than quietly accepting material that has changed (DP-004). The document is canonical JSON (RFC 8785) and has nowhere to record a timestamp, hostname, user, registry destination, or credential -- a lock is committed to a repository, so anything it can hold is something that leaks.",
+  "type": "object",
+  "required": [
+    "apiVersion",
+    "kind",
+    "manifestDigest",
+    "format",
+    "sources",
+    "files",
+    "treeDigest"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "apiVersion": {
+      "const": "devproof.thingz.io/v1alpha1"
+    },
+    "kind": {
+      "const": "BundleLock"
+    },
+    "manifestDigest": {
+      "$ref": "#/$defs/digest",
+      "description": "Binds this lock to one manifest, computed over the manifest's normalized typed model rather than its bytes, so YAML spelling, comments, and key order do not affect it. A manifest edit that changes meaning invalidates the lock."
+    },
+    "format": {
+      "$ref": "#/$defs/format"
+    },
+    "sources": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/lockedSource"
+      },
+      "description": "Sorted by name, so the order resolvers finished in -- which is concurrency-dependent -- cannot reach the lock digest (DP-012)."
+    },
+    "files": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/lockedFile"
+      },
+      "description": "Sorted by canonical path bytes, strictly increasing.",
+      "minItems": 1
+    },
+    "treeDigest": {
+      "$ref": "#/$defs/digest",
+      "description": "The canonical payload identity this lock commits to."
+    }
+  },
+  "$defs": {
+    "digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "description": "Format v1 accepts SHA-256 only, in lowercase hexadecimal. The algorithm is explicit so a digest cannot be interpreted under the wrong one."
+    },
+    "format": {
+      "const": "devproof-bundle-v1",
+      "description": "The bundle format this lock was produced for. Readers dispatch on it and reject what they do not recognize rather than guessing."
+    },
+    "logicalName": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 63,
+      "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"
+    },
+    "mode": {
+      "type": "integer",
+      "enum": [
+        420,
+        493
+      ],
+      "description": "Normalized file mode, decimal: 420 is 0644 and 493 is 0755. A regular file with any execute bit set becomes 0755; every other regular file becomes 0644. Setuid, setgid, sticky, and read/write variations are not preserved (DP-005)."
+    },
+    "lockedSource": {
+      "type": "object",
+      "required": [
+        "name",
+        "type",
+        "resolver",
+        "treeDigest"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "$ref": "#/$defs/logicalName"
+        },
+        "type": {
+          "type": "string"
+        },
+        "resolver": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The implementation and version that produced this resolution, so a resolver whose behavior changed cannot silently satisfy a lock made by an earlier one."
+        },
+        "requested": {
+          "type": "object",
+          "additionalProperties": true,
+          "description": "What the manifest asked for, which may be mutable."
+        },
+        "resolved": {
+          "type": "object",
+          "additionalProperties": true,
+          "description": "What it resolved to, which must not be."
+        },
+        "treeDigest": {
+          "$ref": "#/$defs/digest",
+          "description": "This source's filtered contribution before its mount path is applied. It is the common identity across source types: a Git commit and a local directory holding the same files have the same value here."
+        },
+        "mountPath": {
+          "type": "string"
+        },
+        "include": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "exclude": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "lockedFile": {
+      "type": "object",
+      "required": [
+        "path",
+        "source",
+        "sourcePath",
+        "mode",
+        "size",
+        "digest"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Final canonical path in the bundle."
+        },
+        "source": {
+          "type": "string",
+          "description": "The single owner of this path. Every final path has exactly one (DP-011), and the named source must appear in this lock's sources."
+        },
+        "sourcePath": {
+          "type": "string",
+          "description": "Path within the source, before the mount path is applied."
+        },
+        "mode": {
+          "$ref": "#/$defs/mode"
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "digest": {
+          "$ref": "#/$defs/digest"
+        }
+      }
+    }
+  }
+}

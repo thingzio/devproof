@@ -1,0 +1,220 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://devproof.thingz.io/schemas/verification-policy.v1alpha1.schema.json",
+  "title": "DevProof verification policy",
+  "description": "Rules deciding whether verified facts about an immutable subject satisfy a caller's trust requirements. A policy is trusted configuration supplied by the caller; it is never read from the artifact being evaluated, because an attacker who controls a bundle must not control the rules it is judged by. Decoding is strict in both the loader and this schema: an unknown field is an error, since a rule this build does not understand is a rule it would not enforce, and silently ignoring one turns a strict policy into a permissive one (DP-014).",
+  "type": "object",
+  "required": ["apiVersion", "kind", "metadata"],
+  "additionalProperties": false,
+  "properties": {
+    "apiVersion": {
+      "const": "devproof.thingz.io/v1alpha1"
+    },
+    "kind": {
+      "const": "VerificationPolicy"
+    },
+    "metadata": {
+      "type": "object",
+      "required": ["name"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "$ref": "#/$defs/logicalName" }
+      }
+    },
+    "spec": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subject": { "$ref": "#/$defs/subjectRules" },
+        "signatures": { "$ref": "#/$defs/signatureRules" },
+        "provenance": { "$ref": "#/$defs/provenanceRules" },
+        "evidence": { "$ref": "#/$defs/evidenceRules" },
+        "limits": { "$ref": "#/$defs/limits" }
+      }
+    }
+  },
+  "$defs": {
+    "logicalName": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 63,
+      "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"
+    },
+    "subjectRules": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Constraints on the artifact itself.",
+      "properties": {
+        "requireDigestReference": {
+          "type": "boolean",
+          "description": "Reject a tag before anything is fetched. Digests are authoritative; tags are pointers (DP-007)."
+        },
+        "allowedFormats": {
+          "type": "array",
+          "items": { "const": "devproof-bundle-v1" },
+          "description": "Acceptable bundle format versions. Empty means any format this build supports."
+        },
+        "maxFiles": { "$ref": "#/$defs/limitValue" },
+        "maxExpandedBytes": { "$ref": "#/$defs/limitValue" }
+      }
+    },
+    "signatureRules": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Constraints on who signed. Threshold counting happens after cryptographic verification and identity matching.",
+      "properties": {
+        "threshold": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "How many distinct accepted identities are required. Zero with no identities means signatures are not required. Must not exceed the number of listed identities -- a threshold no evidence could ever satisfy is indistinguishable from a policy that is working."
+        },
+        "identities": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/identityRule" }
+        },
+        "requireTransparencyLog": {
+          "type": "boolean",
+          "description": "Demand a proven transparency-log inclusion, not merely a timestamp."
+        }
+      },
+      "if": {
+        "required": ["threshold"],
+        "properties": { "threshold": { "minimum": 1 } }
+      },
+      "then": {
+        "required": ["identities"],
+        "properties": { "identities": { "minItems": 1 } }
+      }
+    },
+    "identityRule": {
+      "description": "One accepted signer. Exactly one form may be given: a bare public key, or an OIDC identity. A rule naming both would be ambiguous about which had to match, and \"either\" is spelled by writing two rules.",
+      "oneOf": [
+        { "$ref": "#/$defs/identityByKey" },
+        { "$ref": "#/$defs/identityByOIDC" }
+      ]
+    },
+    "identityByKey": {
+      "type": "object",
+      "required": ["keyId"],
+      "additionalProperties": false,
+      "properties": {
+        "keyId": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Public key identifier, matched case-insensitively."
+        }
+      }
+    },
+    "identityByOIDC": {
+      "type": "object",
+      "required": ["issuer"],
+      "additionalProperties": false,
+      "description": "An issuer is always required. A subject with no issuer would accept that subject from any issuer, which is trivially forgeable by standing up an issuer.",
+      "not": { "required": ["subject", "subjectPattern"] },
+      "properties": {
+        "issuer": {
+          "type": "string",
+          "minLength": 1,
+          "description": "OIDC issuer, matched exactly."
+        },
+        "subject": {
+          "type": "string",
+          "minLength": 1,
+          "description": "OIDC subject, matched exactly. Mutually exclusive with subjectPattern."
+        },
+        "subjectPattern": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Regular expression alternative to subject, compiled at policy-load time and anchored at both ends by the evaluator. An unanchored pattern matching a substring is how an identity rule gets bypassed."
+        }
+      }
+    },
+    "provenanceRules": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Constraints on what the evidence says. These apply to provenance claims, not to payload identity: two attestations may truthfully describe different source histories for one subject, and policy chooses which history it is willing to trust.",
+      "properties": {
+        "required": {
+          "type": "boolean",
+          "description": "Demand provenance evidence. Provenance that must be present must also be signed by somebody, so this implies a threshold of at least one."
+        },
+        "predicateTypes": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "description": "Acceptable predicate types. DevProof provenance is https://devproof.thingz.io/provenance/v1, which embeds a SLSA Provenance v1 document unchanged, so a policy requiring https://slsa.dev/provenance/v1 is satisfied by the embedded document (DP-024)."
+        },
+        "requireLockDigest": {
+          "type": "boolean",
+          "description": "Demand that provenance records a lock digest, which is what makes a build's inputs auditable after the fact."
+        },
+        "allowedBuilders": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "sources": { "$ref": "#/$defs/sourceRules" }
+      }
+    },
+    "sourceRules": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "allowedTypes": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "description": "Permitted source types, such as git or path."
+        },
+        "allowedHosts": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "description": "Permitted hosts for remote sources."
+        },
+        "requireImmutableResolution": {
+          "type": "boolean",
+          "description": "Demand that every source resolved to something immutable."
+        }
+      }
+    },
+    "evidenceRules": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "How candidate evidence is treated. An OCI repository is an open attachment surface, so the presence of an unrelated or malicious referrer must not by itself make a valid subject unverifiable.",
+      "properties": {
+        "rejectInvalidMatchingEvidence": {
+          "type": "boolean",
+          "description": "Make malformed evidence that claims a required type fatal on its own. Even when false, policy still fails if the remaining verified evidence cannot satisfy its requirements."
+        },
+        "allowTagFallback": {
+          "type": "boolean",
+          "description": "Permit evidence stored under the fallback tag scheme on registries without the referrers API. Off by default, because that mode cannot express a set and silently replaces (DP-028)."
+        }
+      }
+    },
+    "limitValue": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Zero means unset and inherits the effective default. Zero never means unlimited."
+    },
+    "limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Resource bounds. A policy may tighten a bound but never relax one: the effective value is the minimum across the client's limits, the request's limits, and these, which keeps a policy from being usable as a privilege escalation against the embedding application's own configuration (DP-021). Each maximum here is the format's hard ceiling from DP-020; a value above it is refused at load time.",
+      "properties": {
+        "maxFiles": { "type": "integer", "minimum": 0, "maximum": 1000000 },
+        "maxFileBytes": { "type": "integer", "minimum": 0, "maximum": 8589934591 },
+        "maxExpandedBytes": { "type": "integer", "minimum": 0, "maximum": 68719476736 },
+        "maxCompressedBytes": { "type": "integer", "minimum": 0, "maximum": 17179869184 },
+        "maxCompressionRatio": { "type": "integer", "minimum": 0, "maximum": 1000 },
+        "maxPathBytes": { "type": "integer", "minimum": 0, "maximum": 4096 },
+        "maxPathSegmentBytes": { "type": "integer", "minimum": 0, "maximum": 255 },
+        "maxPathDepth": { "type": "integer", "minimum": 0, "maximum": 256 },
+        "maxConfigBytes": { "type": "integer", "minimum": 0, "maximum": 268435456 },
+        "maxManifestBytes": { "type": "integer", "minimum": 0, "maximum": 4194304 },
+        "maxSpecBytes": { "type": "integer", "minimum": 0, "maximum": 16777216 },
+        "maxLockBytes": { "type": "integer", "minimum": 0, "maximum": 67108864 },
+        "maxReferrers": { "type": "integer", "minimum": 0, "maximum": 4096 },
+        "maxEvidenceBytes": { "type": "integer", "minimum": 0, "maximum": 67108864 },
+        "maxParallelSources": { "type": "integer", "minimum": 0, "maximum": 64 }
+      }
+    }
+  }
+}

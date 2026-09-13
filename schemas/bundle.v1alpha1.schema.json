@@ -1,0 +1,95 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://devproof.thingz.io/schemas/bundle.v1alpha1.schema.json",
+  "title": "DevProof bundle manifest",
+  "description": "A bundle manifest records intent: which sources to compose and how to place them. It may name mutable things such as a branch or a local directory; resolving those into something immutable is the lock's job (DP-004).",
+  "type": "object",
+  "required": ["apiVersion", "kind", "metadata", "spec"],
+  "additionalProperties": false,
+  "properties": {
+    "apiVersion": {
+      "const": "devproof.thingz.io/v1alpha1"
+    },
+    "kind": {
+      "const": "Bundle"
+    },
+    "metadata": {
+      "type": "object",
+      "required": ["name"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "$ref": "#/$defs/logicalName",
+          "description": "A label for diagnostics and evidence. It does not affect payload or subject identity: two bundles with the same content and different names have the same digest (DP-002)."
+        }
+      }
+    },
+    "spec": {
+      "type": "object",
+      "required": ["sources"],
+      "additionalProperties": false,
+      "properties": {
+        "sources": {
+          "type": "array",
+          "minItems": 1,
+          "description": "Sources to compose. Every final payload path has exactly one source owner; collisions fail even when the colliding bytes are equal, and source order is never precedence (DP-011).",
+          "items": { "$ref": "#/$defs/source" }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "logicalName": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 63,
+      "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$",
+      "description": "Lowercase ASCII letters, digits, and hyphens, beginning and ending alphanumeric. The grammar is restrictive because these names appear in diagnostics, evidence, and error messages, where a control character is a way to forge output."
+    },
+    "source": {
+      "type": "object",
+      "required": ["name", "type"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "$ref": "#/$defs/logicalName",
+          "description": "Unique within the manifest."
+        },
+        "type": {
+          "type": "string",
+          "pattern": "^(?:path|git|[^/]*\\.[^/]*/.+)$",
+          "description": "A built-in short type (path, git) or a domain-qualified extension type such as storage.example.com/object. Requiring a domain keeps the short namespace reserved, so an application cannot register something called \"git\" and have manifests silently mean it."
+        },
+        "mountPath": {
+          "$ref": "#/$defs/mountPath"
+        },
+        "include": {
+          "$ref": "#/$defs/patternList",
+          "description": "Selection patterns. Absent means everything. A path must match at least one."
+        },
+        "exclude": {
+          "$ref": "#/$defs/patternList",
+          "description": "Rejection patterns, applied after include."
+        },
+        "config": {
+          "type": "object",
+          "description": "Resolver-specific configuration. Held untyped here because an unknown key is the registered resolver's error to report, not the loader's. Decoding into the resolver's own type is strict.",
+          "additionalProperties": true
+        }
+      }
+    },
+    "mountPath": {
+      "type": "string",
+      "pattern": "^(?:\\.|(?:[^/.][^/]*|\\.[^/.][^/]*|\\.\\.[^/]+)(?:/(?:[^/.][^/]*|\\.[^/.][^/]*|\\.\\.[^/]+))*)$",
+      "description": "Destination below the bundle root. \".\" and an omitted value both mean the root. Must be relative, with no empty, \".\", or \"..\" segments. The pattern says which segments are allowed rather than which are forbidden, because a negative lookahead is not available: JSON Schema specifies ECMA-262 regular expressions, but widely used validators compile patterns with RE2, which has no lookahead and rejects such a schema outright."
+    },
+    "patternList": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "description": "Slash-separated glob patterns supporting *, ?, character classes, and ** for complete path segments. There is no negation, no ordering, and no .gitignore inheritance. Treated as a set and sorted in the lock."
+    }
+  }
+}

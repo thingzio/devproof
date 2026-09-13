@@ -171,6 +171,13 @@ func (l *Lock) Validate() error {
 	if len(l.Sources) == 0 {
 		return fault.New(fault.CodeInvalidInput, lockOp, "lock records no sources")
 	}
+	// A source selecting no regular files is already an error at resolve
+	// time, so a lock with an empty inventory is something no conforming
+	// writer produces. Accepting one would mean a lock whose treeDigest
+	// commits to a payload it does not describe.
+	if len(l.Files) == 0 {
+		return fault.New(fault.CodeInvalidInput, lockOp, "lock records no files")
+	}
 
 	owners := make(map[string]struct{}, len(l.Sources))
 	for i := range l.Sources {

@@ -1,0 +1,84 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://devproof.thingz.io/schemas/bundle-config.v1.schema.json",
+  "title": "DevProof bundle config blob, format v1",
+  "description": "The exact inventory of what a bundle contains, stored as the OCI config blob with media type application/vnd.thingz.devproof.config.v1+json and encoded with RFC 8785 JSON canonicalization. It exists so verification never has to trust tar extraction behavior: a consumer checks every entry against this list before writing anything. The document deliberately has nowhere to put a bundle name, source, timestamp, builder, registry reference, tag, annotation, or signature -- admitting any of them would make two builds of identical content produce different subject digests (DP-002).",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "format",
+    "treeDigest",
+    "fileCount",
+    "totalSize",
+    "files"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "const": 1
+    },
+    "format": {
+      "const": "devproof-bundle-v1"
+    },
+    "treeDigest": {
+      "$ref": "#/$defs/digest",
+      "description": "SHA-256 over the domain-separated binary tree-record stream defined in docs/bundle-format.md. Independent of tar and gzip encoding, so it is a stable logical payload identity while the OCI manifest digest identifies the exact encoded artifact."
+    },
+    "fileCount": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Must equal the length of files."
+    },
+    "totalSize": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Must equal the sum of every entry's size."
+    },
+    "files": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/configFile"
+      },
+      "description": "Sorted by canonical UTF-8 path bytes, strictly increasing. Parent directories are derived from these paths and are not entries here. May be empty: format v1 encodes the record count as an integer that may be zero, so an empty tree is representable. A manifest cannot produce one -- composition rejects an empty selection -- but that is a manifest rule, not a format rule."
+    }
+  },
+  "$defs": {
+    "digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "configFile": {
+      "type": "object",
+      "required": [
+        "path",
+        "mode",
+        "size",
+        "digest"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Canonical relative path: valid UTF-8, NFC-normalized, slash-separated, with no \".\" or \"..\" segments and no path aliases."
+        },
+        "mode": {
+          "type": "integer",
+          "enum": [
+            420,
+            493
+          ],
+          "description": "Normalized file mode, decimal: 420 is 0644 and 493 is 0755."
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "digest": {
+          "$ref": "#/$defs/digest",
+          "description": "SHA-256 over the exact file bytes."
+        }
+      }
+    }
+  }
+}
