@@ -193,17 +193,21 @@ func putUint32(dst []byte, v uint32) {
 func verifyLayer(t *testing.T, layer []byte) error {
 	t.Helper()
 
-	config := `{"schemaVersion":1,"format":"devproof-bundle-v1",` +
-		`"treeDigest":"sha256:` + strings.Repeat("0", 64) + `",` +
-		`"fileCount":0,"totalSize":0,"files":[]}`
+	// Members are in UTF-16 code-unit order: the documents are checked for
+	// RFC 8785 canonicality before anything else is read, so a fixture written
+	// in a readable order would fail every vector for the same wrong reason.
+	config := `{"fileCount":0,"files":[],"format":"devproof-bundle-v1",` +
+		`"schemaVersion":1,"totalSize":0,` +
+		`"treeDigest":"sha256:` + strings.Repeat("0", 64) + `"}`
 
-	manifest := fmt.Sprintf(`{"schemaVersion":2,`+
-		`"mediaType":"application/vnd.oci.image.manifest.v1+json",`+
+	manifest := fmt.Sprintf(`{`+
 		`"artifactType":"application/vnd.thingz.devproof.bundle.v1",`+
-		`"config":{"mediaType":"application/vnd.thingz.devproof.config.v1+json",`+
-		`"digest":"%s","size":%d},`+
-		`"layers":[{"mediaType":"application/vnd.oci.image.layer.v1.tar+gzip",`+
-		`"digest":"%s","size":%d}]}`,
+		`"config":{"digest":"%s",`+
+		`"mediaType":"application/vnd.thingz.devproof.config.v1+json","size":%d},`+
+		`"layers":[{"digest":"%s",`+
+		`"mediaType":"application/vnd.oci.image.layer.v1.tar+gzip","size":%d}],`+
+		`"mediaType":"application/vnd.oci.image.manifest.v1+json",`+
+		`"schemaVersion":2}`,
 		digestOf([]byte(config)), len(config), digestOf(layer), len(layer))
 
 	_, err := conformance.VerifyManifest([]byte(manifest), func(digest string) ([]byte, error) {
@@ -506,6 +510,74 @@ func TestGzipHeaderIsFrozen(t *testing.T) {
 			}
 			if !strings.Contains(err.Error(), "frozen v1 header") {
 				t.Errorf("error %q does not mention the frozen header", err)
+			}
+		})
+	}
+}
+
+// TestNonCanonicalJSONIsRejected covers the two documents whose bytes are the
+// artifact's identity.
+//
+// The check used to be a json.Compact round trip, which sees insignificant
+// whitespace and nothing else. Reordered members, a non-minimal string escape,
+// and a number spelled with a leading zero or an exponent all survived it --
+// and every one of them gives two writers two different subject digests for
+// the same payload.
+func TestNonCanonicalJSONIsRejected(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name string
+		doc  string
+		want string
+	}{
+		{"reordered members", `{"b":1,"a":2}`, "UTF-16 order"},
+		{"repeated member", `{"a":1,"a":2}`, "UTF-16 order"},
+		{"a space after a colon", `{"a": 1}`, "whitespace"},
+		{"an escaped solidus", `{"a":"\/"}`, "not one a canonicalizer emits"},
+		{"an escaped newline", `{"a":"\u000a"}`, "short form"},
+		{"an escaped letter", `{"a":"\u0041"}`, "written literally"},
+		{"uppercase hex", `{"a":"\u001F"}`, "uppercase"},
+		{"a leading zero", `{"a":01}`, "canonical form"},
+		{"an exponent", `{"a":1e2}`, "not an integer"},
+		{"a fraction", `{"a":1.0}`, "not an integer"},
+		{"negative zero", `{"a":-0}`, "canonical form"},
+		{"trailing bytes", `{"a":1} `, "trailing bytes"},
+		{"indentation", "{\n  \"a\": 1\n}", "whitespace"},
+		{"an unescaped control character", "{\"a\":\"\x01\"}", "control character"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			err := conformance.CheckCanonicalJSON([]byte(tc.doc))
+			if err == nil {
+				t.Fatalf("non-canonical JSON %s was accepted", tc.doc)
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("error %q does not mention %q", err, tc.want)
+			}
+		})
+	}
+}
+
+// TestCanonicalJSONIsAccepted keeps the check from rejecting everything.
+func TestCanonicalJSONIsAccepted(t *testing.T) {
+	t.Parallel()
+
+	for _, doc := range []string{
+		`{}`,
+		`[]`,
+		`{"a":1,"b":[1,2,3],"c":{"d":true,"e":null}}`,
+		`{"mode":420,"path":"a/b.txt","size":0}`,
+		`{"a":"café"}`,
+		`{"a":-1,"b":9007199254740991}`,
+		`{"A":1,"a":2}`,
+	} {
+		t.Run(doc, func(t *testing.T) {
+			t.Parallel()
+
+			if err := conformance.CheckCanonicalJSON([]byte(doc)); err != nil {
+				t.Errorf("canonical JSON %s was rejected: %v", doc, err)
 			}
 		})
 	}

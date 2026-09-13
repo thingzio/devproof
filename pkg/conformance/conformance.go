@@ -189,6 +189,12 @@ type BlobFetcher func(digest string) ([]byte, error)
 func VerifyManifest(manifestBytes []byte, fetch BlobFetcher) (*Report, error) {
 	manifestDigest := digestOf(manifestBytes)
 
+	// The manifest's digest is the subject's identity, so its spelling is part
+	// of the format and not a detail of whoever encoded it.
+	if err := CheckCanonicalJSON(manifestBytes); err != nil {
+		return nil, fmt.Errorf("the manifest is not canonical JSON: %w", err)
+	}
+
 	// Decoding is strict: a field this reader does not know is a field it
 	// would not enforce, and a manifest carrying one is not a v1 manifest.
 	var m manifest
@@ -616,16 +622,8 @@ func parseConfig(data []byte) (*configBlob, error) {
 		return nil, fmt.Errorf("config treeDigest: %w", err)
 	}
 
-	// RFC 8785 output has no insignificant whitespace, so a config that was
-	// canonicalized survives a re-encode unchanged. This catches a writer
-	// that emitted indented or reordered JSON, which would give two identical
-	// payloads two different config digests.
-	compact := &bytes.Buffer{}
-	if err := json.Compact(compact, data); err != nil {
-		return nil, fmt.Errorf("compacting the config: %w", err)
-	}
-	if !bytes.Equal(compact.Bytes(), data) {
-		return nil, errors.New("the config blob is not canonical JSON: it contains insignificant whitespace")
+	if err := CheckCanonicalJSON(data); err != nil {
+		return nil, fmt.Errorf("the config blob is not canonical JSON: %w", err)
 	}
 	return &config, nil
 }
