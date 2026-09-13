@@ -188,19 +188,30 @@ uname:    empty
 gname:    empty
 size:     0
 mtime:    Unix epoch
-atime:    Unix epoch or absent
-ctime:    Unix epoch or absent
+atime:    absent
+ctime:    absent
 linkname: empty
 ```
 
 Every file header has the same fixed ownership and time fields, type `regular`,
 the canonical path, normalized mode, and exact content size.
 
-V1 uses a deterministic PAX encoding for values not representable directly in
-a USTAR header. Only records required for the canonical path or size may be
-emitted. Record order, header naming, numeric encoding, and padding are fixed by
-the normative golden vectors. No implementation-specific PAX records are
-allowed.
+Access and change times are omitted rather than written as the epoch. Writing
+them requires PAX records that add bytes to the subject for no information, and
+"epoch or absent" was ambiguous: two conforming writers would have produced
+different subject digests for the same tree (DP-019).
+
+A PAX extended header is emitted for exactly one reason: a path too long for
+the 100-byte USTAR name field. It carries a single `path` record. No other
+record, no global header, and no implementation-specific record may appear.
+The USTAR `prefix` field is never written, because using it requires choosing
+where to split a path. A `size` record is never written either; a file larger
+than the eleven octal digits of the USTAR size field can represent — one byte
+short of 8 GiB — is rejected instead, and that bound is the ceiling for
+`maxFileBytes`.
+
+Header naming, numeric encoding, and padding are fixed by the normative golden
+vectors.
 
 Tar padding bytes are zero. Exactly two zero blocks terminate the archive. No
 bytes follow the terminator in the uncompressed stream.

@@ -23,13 +23,21 @@
 // a constant, a sort order, or an encoding helper, they share its bugs, and a
 // round trip passes while the artifact is unreadable by anyone else.
 //
-// So this package is deliberately built from nothing but the standard library
-// and docs/bundle-format.md. It imports no other DevProof package — not the
-// media-type constants, not the canonical encoders, not the digest helpers.
-// Every value it compares against is written out here from the specification
-// text, and every structure it parses it parses again from scratch. Where this
-// package and the main implementation disagree, one of them is wrong, and
-// finding out which is the entire point.
+// So this package is deliberately built from docs/bundle-format.md and nothing
+// else. It imports no other DevProof package — not the media-type constants,
+// not the canonical encoders, not the digest helpers. Every value it compares
+// against is written out here from the specification text, and every structure
+// it parses it parses again from scratch. Where this package and the main
+// implementation disagree, one of them is wrong, and finding out which is the
+// entire point.
+//
+// It reads raw tar blocks rather than using archive/tar. That package is
+// lenient by design: it accepts GNU and base-256 encodings, silently joins the
+// USTAR prefix field onto the name, and hides how a value was spelled. Every
+// one of those kindnesses conceals exactly the deviation this package exists
+// to find, and a reader built on it accepted archives no conforming writer
+// produces. The one outside dependency is a Unicode normalizer, because NFC is
+// a specification rule and its tables are not in the standard library.
 //
 // It is intentionally simple and unoptimized. It buffers what a streaming
 // reader would not, because being obviously correct matters more here than
@@ -38,7 +46,6 @@
 package conformance
 
 import (
-	"archive/tar"
 	"bytes"
 	"compress/gzip"
 	"crypto/sha256"
@@ -55,6 +62,9 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"unicode/utf8"
+
+	"golang.org/x/text/unicode/norm"
 )
 
 // Media types and format identifiers, transcribed from the specification
@@ -319,30 +329,55 @@ func toUint32(n int) (uint32, bool) {
 	return uint32(n), true
 }
 
+// gzipHeaderV1 is the complete fixed gzip header format v1 emits.
+//
+// Transcribed from the specification's frozen settings: magic 1f 8b, DEFLATE,
+// no flags, mtime 0, XFL 2 for maximum compression, OS 255 for unknown. Every
+// one of those is a field that would otherwise record when and where the
+// artifact was built, so the bytes are checked rather than the parsed values --
+// compress/gzip silently tolerates an OS byte it has no opinion about.
+var gzipHeaderV1 = []byte{0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0xff}
+
 // readLayer decompresses and walks the tar, returning the file inventory.
 //
 // Directories are checked for canonical mode but are not returned: the tree
 // digest is over files alone.
 func readLayer(compressed []byte) ([]FileRecord, error) {
+	if len(compressed) < len(gzipHeaderV1) ||
+		!bytes.Equal(compressed[:len(gzipHeaderV1)], gzipHeaderV1) {
+
+		got := compressed
+		if len(got) > len(gzipHeaderV1) {
+			got = got[:len(gzipHeaderV1)]
+		}
+		return nil, fmt.Errorf("the gzip header is %x, want the frozen v1 header %x",
+			got, gzipHeaderV1)
+	}
+
 	zr, err := gzip.NewReader(bytes.NewReader(compressed))
 	if err != nil {
 		return nil, fmt.Errorf("opening the gzip stream: %w", err)
 	}
 	defer func() { _ = zr.Close() }()
 
-	// A gzip member carrying a name or timestamp would make the encoded
-	// artifact depend on when and where it was built.
-	if zr.Name != "" {
-		return nil, fmt.Errorf("the gzip header carries a name %q", zr.Name)
-	}
-	if !zr.ModTime.IsZero() && zr.ModTime.Unix() != 0 {
-		return nil, fmt.Errorf("the gzip header carries a modification time %s", zr.ModTime)
+	// The header bytes above already exclude a name, comment, extra field, and
+	// timestamp, because every one of them requires a flag bit this reader
+	// refuses. Reading the whole member still matters: it is what checks the
+	// trailing CRC and length.
+	plain, err := io.ReadAll(zr)
+	if err != nil {
+		return nil, fmt.Errorf("decompressing the layer: %w", err)
 	}
 
-	tr := tar.NewReader(zr)
+	entries, err := readTar(plain)
+	if err != nil {
+		return nil, err
+	}
+
 	var (
 		files    []FileRecord
 		seen     = map[string]bool{}
+		folded   = map[string]string{}
 		haveDirs = map[string]bool{}
 		needDirs = map[string]bool{}
 		// Entry order is: every required directory in sorted order, then
@@ -353,18 +388,18 @@ func readLayer(compressed []byte) ([]FileRecord, error) {
 		inFiles  bool
 	)
 
-	for {
-		header, err := tr.Next()
-		if errors.Is(err, io.EOF) {
-			break
-		}
-		if err != nil {
-			return nil, fmt.Errorf("reading the tar stream: %w", err)
-		}
-
-		name := header.Name
-		isDir := strings.HasSuffix(name, "/") || header.Typeflag == tar.TypeDir
+	for _, entry := range entries {
+		name := entry.name
+		isDir := entry.typeflag == typeDirectory
 		clean := strings.TrimSuffix(name, "/")
+
+		// A trailing slash is how a directory is spelled and the only place one
+		// is legal. A regular file wearing one would name a path no reader
+		// could open.
+		if strings.HasSuffix(name, "/") != isDir {
+			return nil, fmt.Errorf("entry %q has type %q; only a directory ends in a slash",
+				name, string(entry.typeflag))
+		}
 
 		if err := checkPath(clean); err != nil {
 			return nil, err
@@ -373,6 +408,15 @@ func readLayer(compressed []byte) ([]FileRecord, error) {
 			return nil, fmt.Errorf("duplicate tar entry %q", clean)
 		}
 		seen[clean] = true
+
+		// Case-fold uniqueness is enforced across the complete tree, because a
+		// case-insensitive filesystem would otherwise expand two entries onto
+		// one path and silently keep whichever came last.
+		key := strings.ToLower(clean)
+		if other, collides := folded[key]; collides {
+			return nil, fmt.Errorf("paths %q and %q differ only by case", other, clean)
+		}
+		folded[key] = clean
 
 		// Ordering is checked because a non-deterministic encoder would let
 		// two identical trees produce two different layer digests.
@@ -393,44 +437,18 @@ func readLayer(compressed []byte) ([]FileRecord, error) {
 			lastFile, inFiles = clean, true
 		}
 
-		if header.ModTime.Unix() != 0 {
-			return nil, fmt.Errorf("entry %q has modification time %s, want the epoch",
-				clean, header.ModTime)
-		}
-		if header.Uid != 0 || header.Gid != 0 {
-			return nil, fmt.Errorf("entry %q has uid/gid %d/%d, want 0/0",
-				clean, header.Uid, header.Gid)
-		}
-		if header.Uname != "" || header.Gname != "" {
-			return nil, fmt.Errorf("entry %q carries user or group names", clean)
-		}
-
 		switch {
 		case isDir:
-			if header.Typeflag != tar.TypeDir {
-				return nil, fmt.Errorf("entry %q ends in / but is type %q",
-					clean, string(header.Typeflag))
-			}
-			if mode := header.FileInfo().Mode().Perm(); mode != modeDirectory {
+			if entry.mode != modeDirectory {
 				return nil, fmt.Errorf("directory %q has mode %04o, want %04o",
-					clean, mode, modeDirectory)
+					clean, entry.mode, modeDirectory)
 			}
 			haveDirs[clean] = true
 
-		case header.Typeflag == tar.TypeReg:
-			mode := uint32(header.FileInfo().Mode().Perm())
-			if mode != modeFile && mode != modeExecutable {
+		default:
+			if entry.mode != modeFile && entry.mode != modeExecutable {
 				return nil, fmt.Errorf("file %q has mode %04o, want %04o or %04o",
-					clean, mode, modeFile, modeExecutable)
-			}
-
-			content, err := io.ReadAll(tr)
-			if err != nil {
-				return nil, fmt.Errorf("reading %q: %w", clean, err)
-			}
-			if int64(len(content)) != header.Size {
-				return nil, fmt.Errorf("entry %q declares %d bytes but carries %d",
-					clean, header.Size, len(content))
+					clean, entry.mode, modeFile, modeExecutable)
 			}
 
 			for parent := path.Dir(clean); parent != "." && parent != "/"; parent = path.Dir(parent) {
@@ -439,17 +457,10 @@ func readLayer(compressed []byte) ([]FileRecord, error) {
 
 			files = append(files, FileRecord{
 				Path:   clean,
-				Mode:   mode,
-				Size:   header.Size,
-				Digest: digestOf(content),
+				Mode:   entry.mode,
+				Size:   entry.size,
+				Digest: digestOf(entry.content),
 			})
-
-		default:
-			// Symlinks, devices, FIFOs, and hard links are not representable
-			// in v1. A reader that skipped them would expand a different tree
-			// than the one whose digest it verified.
-			return nil, fmt.Errorf("entry %q has unsupported type %q",
-				clean, string(header.Typeflag))
 		}
 	}
 
@@ -467,25 +478,69 @@ func readLayer(compressed []byte) ([]FileRecord, error) {
 	return files, nil
 }
 
-// checkPath applies the canonical path rules.
+// reservedNames are the device names a portable path may not use, in any
+// case, with or without an extension.
+//
+// They are not Windows trivia: a path that cannot be created on a supported
+// platform is one that expands correctly on the machine that built it and
+// fails on the machine that consumes it, which is the failure this format
+// exists to prevent.
+var reservedNames = map[string]bool{
+	"con": true, "prn": true, "aux": true, "nul": true,
+	"com1": true, "com2": true, "com3": true, "com4": true, "com5": true,
+	"com6": true, "com7": true, "com8": true, "com9": true,
+	"lpt1": true, "lpt2": true, "lpt3": true, "lpt4": true, "lpt5": true,
+	"lpt6": true, "lpt7": true, "lpt8": true, "lpt9": true,
+}
+
+// reservedRunes may not appear in a path segment.
+const reservedRunes = `<>:"\\|?*`
+
+// checkPath applies the canonical path rules from the specification.
+//
+// Every numbered rule in the path-normalization section is checked here. A
+// reader that enforced only the obvious ones would accept archives that no
+// conforming writer produces and that some consumer cannot expand, which is
+// the same as having no rule.
 func checkPath(p string) error {
 	switch {
 	case p == "":
 		return errors.New("an entry has an empty path")
+	case !utf8.ValidString(p):
+		return fmt.Errorf("path %q is not valid UTF-8", p)
 	case strings.HasPrefix(p, "/"):
 		return fmt.Errorf("path %q is absolute", p)
 	case p != path.Clean(p):
 		return fmt.Errorf("path %q is not clean", p)
-	case strings.Contains(p, `\`):
-		return fmt.Errorf("path %q contains a backslash", p)
+	case !norm.NFC.IsNormalString(p):
+		return fmt.Errorf("path %q is not Unicode NFC", p)
 	}
-	for _, element := range strings.Split(p, "/") {
-		if element == "" || element == "." || element == ".." {
-			return fmt.Errorf("path %q contains the element %q", p, element)
+
+	for _, r := range p {
+		if r == 0 {
+			return fmt.Errorf("path %q contains a NUL", p)
+		}
+		if r < 0x20 || r == 0x7f {
+			return fmt.Errorf("path %q contains the control character U+%04X", p, r)
 		}
 	}
-	if strings.ContainsRune(p, 0) {
-		return fmt.Errorf("path %q contains a NUL", p)
+
+	for _, segment := range strings.Split(p, "/") {
+		if segment == "" || segment == "." || segment == ".." {
+			return fmt.Errorf("path %q contains the element %q", p, segment)
+		}
+		if strings.HasSuffix(segment, " ") || strings.HasSuffix(segment, ".") {
+			return fmt.Errorf("path %q has a segment ending in a space or period", p)
+		}
+		if i := strings.IndexAny(segment, reservedRunes); i >= 0 {
+			return fmt.Errorf("path %q contains the reserved character %q", p, segment[i])
+		}
+		// Reserved with an extension too: CON.txt names the console on the
+		// platforms that reserve CON.
+		stem, _, _ := strings.Cut(segment, ".")
+		if reservedNames[strings.ToLower(stem)] {
+			return fmt.Errorf("path %q uses the reserved device name %q", p, stem)
+		}
 	}
 	return nil
 }
