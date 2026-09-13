@@ -137,3 +137,43 @@ spec:
 		t.Fatalf("the example in docs/policy.md does not parse: %v", err)
 	}
 }
+
+// TestNegativeSubjectLimitsAreRejected closes a fail-open gap.
+//
+// Document.Validate checked spec.limits but not subject.maxFiles or
+// subject.maxExpandedBytes, and the evaluator applies those only when they are
+// greater than zero. A policy setting maxFiles: -1 therefore loaded cleanly
+// and silently enforced nothing -- the one outcome a strict, fail-closed
+// document type must not have, because it looks exactly like a policy that is
+// working.
+func TestNegativeSubjectLimitsAreRejected(t *testing.T) {
+	t.Parallel()
+
+	for _, field := range []string{"maxFiles", "maxExpandedBytes"} {
+		t.Run(field, func(t *testing.T) {
+			t.Parallel()
+
+			doc := policyHeader + "spec:\n  subject:\n    " + field + ": -1\n"
+			_, err := policy.ParseDocument([]byte(doc))
+			if err == nil {
+				t.Fatalf("a negative subject.%s was accepted", field)
+			}
+			if !strings.Contains(err.Error(), field) {
+				t.Errorf("the error does not name the offending field: %v", err)
+			}
+		})
+	}
+}
+
+// TestZeroSubjectLimitsStayUnset guards the boundary the fix must not move.
+//
+// Zero means "unset, inherit the effective limit" everywhere else in this
+// project, and a policy that omits a bound is the ordinary case.
+func TestZeroSubjectLimitsStayUnset(t *testing.T) {
+	t.Parallel()
+
+	doc := policyHeader + "spec:\n  subject:\n    maxFiles: 0\n"
+	if _, err := policy.ParseDocument([]byte(doc)); err != nil {
+		t.Errorf("an explicit zero was rejected: %v", err)
+	}
+}

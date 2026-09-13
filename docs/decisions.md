@@ -93,10 +93,19 @@ leaves a destination that looks successful.
 
 ## DP-009: Extensibility uses explicit Go registration
 
-The SDK supports registered source resolvers, transports, attesters, and policy
-evaluators. Registrations are supplied when constructing a client. V1 does not
+The SDK supports registered source resolvers, transports, attesters, and
+verifiers. Registrations are supplied when constructing a client. V1 does not
 load Go plugins, execute binaries discovered on `PATH`, or run code from a
 bundle.
+
+The verification-policy evaluator is deliberately not among them. This
+decision listed it for a while and no option existed, which is the worse of
+the two errors: a documented extension point nobody can reach. Closing it is
+the honest reading, and it follows DP-026 — an exported interface is a
+permanent obligation, and trust evaluation has one implementation rather than
+the two that would show the shape is right. Domain-specific judgement belongs
+in the semantic validator, which asks what the payload *means*; "who signed
+this, and do I accept them" is the same question everywhere.
 
 Consequence: applications can extend behavior while retaining dependency,
 configuration, and trust control.

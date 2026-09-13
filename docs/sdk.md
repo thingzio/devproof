@@ -54,21 +54,33 @@ does not remove caller-owned artifacts or output directories. Calls after
 
 ## Construction options
 
-Expected options include:
-
 ```go
-WithResolver(source.Resolver)
-WithTransport(artifact.Transport)
-WithAttester(evidence.Attester)
-WithPolicyEvaluator(policy.Evaluator)
-WithCredentialProvider(auth.Provider)
+WithLimits(Limits)                          // bounds, intersected with policy
+WithResolver(source.Resolver)               // an additional source type
+WithAbsolutePathSources()                   // allow absolute local paths
+WithTransport(artifact.Transport)           // an additional reference scheme
+WithRegistryCredentials(credentials.Provider)
+WithInsecureRegistry()                      // plain HTTP; warns
+WithOffline()                               // refuse anything that needs the network
+WithSigstore(evidence.SigstoreOptions)      // keyless signing and verification
+WithAttester(evidence.Attester)             // sign with something else
+WithVerifier(evidence.Verifier)             // verify with something else
+WithTrustRoots(...[]byte)                   // trust material for verification
+WithTempRoot(string)                        // scratch space for snapshots
+WithClock(Clock)                            // evidence and diagnostics only
 WithLogger(*slog.Logger)
-WithTracer(trace.TracerProvider)
-WithTempRoot(string)
-WithMaxParallelSources(int)
-WithLimits(Limits)
-WithClock(Clock)
 ```
+
+There is no option to replace the verification-policy evaluator, and that is
+deliberate. Signing and transport have two implementations each, which is what
+proved those interfaces were shaped around the contract rather than around one
+provider; trust evaluation has one, and exporting an interface for it now
+would be a permanent compatibility obligation taken on a guess (DP-026 makes
+the same argument about the semantic validator).
+
+The seam that domain-specific rules actually want is the semantic validator,
+which judges payload *meaning*. Trust evaluation asks who signed this and do I
+accept them, which is the same question in every domain.
 
 Construction validates duplicate extension names and incompatible
 dependencies. There is no mutable global extension registry.
@@ -182,25 +194,36 @@ satisfies a policy requiring an authenticated identity.
 ```go
 package policy
 
-type Evaluator interface {
-    Evaluate(context.Context, Input) (*Report, error)
-}
+func Evaluate(doc *Document, input Input) *Report
 
 type Input struct {
-    Subject    artifact.Descriptor
-    Integrity IntegrityFacts
-    Evidence  []VerifiedEvidence
-    Policy     Document
+    SubjectDigest           string
+    Format                  bundle.Format
+    SuppliedDigestReference bool
+    FileCount               int64
+    TotalBytes              int64
+
+    Evidence []VerifiedEvidence
+    Rejected []RejectedEvidence
+
+    EvaluatedAt time.Time
 }
 ```
 
-Only cryptographically verified evidence enters `VerifiedEvidence`. Invalid
-candidate evidence is retained separately in diagnostics so a policy cannot
-accidentally treat parsed but unauthenticated claims as facts.
+A function rather than an interface, for the reason in the construction
+options above: one implementation is not enough to know what an exported
+interface should look like.
 
-Policy evaluation is deterministic for a supplied subject, evidence set,
-policy, trust roots, and evaluation time. When time constraints are used, the
-result records the evaluation time.
+Only cryptographically verified evidence reaches `Evidence`. Candidates that
+failed verification are in `Rejected`, separately, so that "the policy was not
+satisfied" and "somebody attached junk to this repository" stay
+distinguishable and neither can be mistaken for the other. The evaluator has
+no access to unverified claims at all; that is a structural guarantee rather
+than a rule it follows.
+
+Evaluation is deterministic for a given document, subject, evidence set, and
+evaluation time. When a time-dependent rule is used, the result records the
+time it used.
 
 ## Semantic validator contract
 

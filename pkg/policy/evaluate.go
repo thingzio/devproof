@@ -162,6 +162,14 @@ func evaluateSignatures(doc *Document, input Input, report *Report) []VerifiedEv
 	// by a single compromised signer.
 	matched := make(map[string]struct{})
 
+	// Only signers a rule actually named are recorded, and each once.
+	//
+	// Every identity on a contributing object used to be copied in, so a
+	// signer the policy had never heard of appeared as accepted whenever
+	// somebody else on the same object matched. A report records who was
+	// believed; listing an unexamined signer beside a trusted one makes it
+	// useless for the question it exists to answer.
+	reported := make(map[string]struct{})
 	for _, item := range input.Evidence {
 		contributed := false
 		for _, identity := range item.Identities {
@@ -171,10 +179,15 @@ func evaluateSignatures(doc *Document, input Input, report *Report) []VerifiedEv
 			}
 			matched[rule] = struct{}{}
 			contributed = true
+
+			name := identity.String()
+			if _, seen := reported[name]; name != "" && !seen {
+				reported[name] = struct{}{}
+				report.AcceptedIdentities = append(report.AcceptedIdentities, name)
+			}
 		}
 		if contributed {
 			accepted = append(accepted, item)
-			report.AcceptedIdentities = append(report.AcceptedIdentities, identityStrings(item.Identities)...)
 		}
 	}
 
@@ -236,14 +249,6 @@ func matchIdentity(rules []IdentityRule, identity evidence.Identity) (string, bo
 		}
 	}
 	return "", false
-}
-
-func identityStrings(identities []evidence.Identity) []string {
-	out := make([]string, 0, len(identities))
-	for _, identity := range identities {
-		out = append(out, identity.String())
-	}
-	return out
 }
 
 func evaluateProvenance(doc *Document, input Input, accepted []VerifiedEvidence, report *Report) {

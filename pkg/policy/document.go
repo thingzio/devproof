@@ -199,6 +199,25 @@ func (d *Document) Validate() error {
 		}
 	}
 
+	// A negative bound is refused rather than ignored. The evaluator applies
+	// these only when they are positive, so a negative value loaded cleanly
+	// and enforced nothing -- a policy that looks exactly like one that is
+	// working while checking less than the caller wrote down. Zero keeps its
+	// meaning everywhere in this project: unset, inherit the effective limit.
+	for _, bound := range []struct {
+		field string
+		value int64
+	}{
+		{"subject.maxFiles", d.Spec.Subject.MaxFiles},
+		{"subject.maxExpandedBytes", d.Spec.Subject.MaxExpandedBytes},
+	} {
+		if bound.value < 0 {
+			return fault.New(fault.CodeInvalidInput, documentOp,
+				fmt.Sprintf("%s is %d; a bound must not be negative, and zero means unset",
+					bound.field, bound.value))
+		}
+	}
+
 	if err := d.Spec.Signatures.validate(); err != nil {
 		return err
 	}
