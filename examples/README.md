@@ -11,6 +11,12 @@ afterwards.
 You need `devproof` on your `PATH` ([install](../README.md#install)) and
 `python3`, used once to read a digest out of JSON.
 
+> **Step 5 needs a build newer than `v0.1.1`.** Check with `devproof version`.
+> Standalone `verify` did not read the payload before that fix, so on `v0.1.1`
+> the tampered artifact in that step still reports `integrity: pass` — which
+> is the behaviour the fix removed, not the one the step is demonstrating.
+> Every other step works on any version.
+
 ```bash
 mkdir devproof-demo && cd devproof-demo
 ```
