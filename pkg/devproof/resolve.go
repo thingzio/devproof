@@ -35,11 +35,11 @@ const resolveOp = "resolve"
 
 // resolution is everything a manifest resolved to, ready to compose.
 type resolution struct {
-	spec           *bundle.Spec
-	manifestDigest canonical.Digest
-	sources        []compose.Source
-	materials      map[string]source.Material
-	composed       *compose.Result
+	spec       *bundle.Spec
+	specDigest canonical.Digest
+	sources    []compose.Source
+	materials  map[string]source.Material
+	composed   *compose.Result
 }
 
 // close releases every snapshot the resolution owns.
@@ -67,21 +67,21 @@ func (c *Client) resolveSpec(
 	limits bundle.Limits,
 ) (_ *resolution, retErr error) {
 
-	manifestDigest, _, err := canonical.JSONDigest(spec.Normalized())
+	specDigest, _, err := canonical.JSONDigest(spec.Normalized())
 	if err != nil {
 		return nil, err
 	}
 
-	if lock != nil && lock.ManifestDigest != manifestDigest.String() {
+	if lock != nil && lock.ManifestDigest != specDigest.String() {
 		return nil, fault.New(fault.CodeStaleLock, resolveOp,
 			fmt.Sprintf("the lock was made for a different manifest: it records %s, "+
-				"this manifest is %s", lock.ManifestDigest, manifestDigest))
+				"this manifest is %s", lock.ManifestDigest, specDigest))
 	}
 
 	result := &resolution{
-		spec:           spec,
-		manifestDigest: manifestDigest,
-		materials:      make(map[string]source.Material, len(spec.Spec.Sources)),
+		spec:       spec,
+		specDigest: specDigest,
+		materials:  make(map[string]source.Material, len(spec.Spec.Sources)),
 	}
 	defer func() {
 		if retErr != nil {
@@ -241,7 +241,7 @@ func (r *resolution) buildLock(treeDigest canonical.Digest) (*bundle.Lock, error
 	}
 
 	lock := bundle.NewLock(
-		r.manifestDigest.String(), bundle.FormatV1, sources, files, treeDigest.String())
+		r.specDigest.String(), bundle.FormatV1, sources, files, treeDigest.String())
 	if err := lock.Validate(); err != nil {
 		return nil, err
 	}

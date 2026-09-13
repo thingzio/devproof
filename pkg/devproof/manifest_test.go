@@ -212,11 +212,11 @@ spec:
 		t.Errorf("source order changed the subject digest:\n  %s\n  %s",
 			first.SubjectDigest, second.SubjectDigest)
 	}
-	// The manifest digest is computed over the normalized model, so
+	// The spec digest is computed over the normalized model, so
 	// reordering sources and include lists does not change it either.
-	if first.ManifestDigest != second.ManifestDigest {
-		t.Errorf("source order changed the manifest digest:\n  %s\n  %s",
-			first.ManifestDigest, second.ManifestDigest)
+	if first.SpecDigest != second.SpecDigest {
+		t.Errorf("source order changed the spec digest:\n  %s\n  %s",
+			first.SpecDigest, second.SpecDigest)
 	}
 	if first.LockDigest != second.LockDigest {
 		t.Errorf("source order changed the lock digest")

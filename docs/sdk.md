@@ -180,11 +180,11 @@ type Attester interface {
 }
 
 type AttestRequest struct {
-    Subject       artifact.Descriptor
-    ManifestDigest digest.Digest
-    LockDigest     digest.Digest
-    Materials      []source.Material
-    Builder        Builder
+    Subject    artifact.Descriptor
+    SpecDigest bundle.Digest
+    LockDigest bundle.Digest
+    Materials  []source.Material
+    Builder    Builder
 }
 ```
 

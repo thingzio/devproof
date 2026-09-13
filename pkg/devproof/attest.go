@@ -75,7 +75,7 @@ func buildPredicate(res *resolution, subject *canonical.Subject, lock *bundle.Lo
 		BuildDefinition: evidence.BuildDefinition{
 			BuildType: buildTypeV1,
 			ExternalParameters: map[string]any{
-				"manifestDigest": res.manifestDigest.String(),
+				"specDigest": res.specDigest.String(),
 			},
 			ResolvedDependencies: dependencies,
 		},
@@ -87,7 +87,7 @@ func buildPredicate(res *resolution, subject *canonical.Subject, lock *bundle.Lo
 		},
 		DevProof: evidence.DevProofProvenance{
 			FormatVersion:  subject.Config.Format.String(),
-			ManifestDigest: res.manifestDigest.String(),
+			ManifestDigest: res.specDigest.String(),
 			LockDigest:     lockDigestOf(lock),
 			TreeDigest:     subject.TreeDigest.String(),
 			Sources:        sources,

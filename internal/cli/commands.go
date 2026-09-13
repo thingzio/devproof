@@ -277,7 +277,7 @@ func (a *App) lockCommand() *cli.Command {
 			return a.printer.Result("LockResult", result, result.LockDigest, func(w io.Writer) {
 				Field(w, "lock", result.OutputPath)
 				Field(w, "lock digest", result.LockDigest)
-				Field(w, "manifest digest", result.ManifestDigest)
+				Field(w, "spec digest", result.SpecDigest)
 				Field(w, "tree digest", result.TreeDigest)
 				Field(w, "sources", fmt.Sprint(result.SourceCount))
 				Field(w, "files", fmt.Sprint(result.FileCount))

@@ -89,16 +89,25 @@ type BuildRequest struct {
 // Every identifier is a digest. A tag is reported separately and never stands
 // in for one (DP-007).
 type BuildResult struct {
-	SubjectDigest  string
-	TreeDigest     string
-	ConfigDigest   string
-	LayerDigest    string
-	ManifestDigest string
-	LockDigest     string
-	Format         string
-	FileCount      int64
-	TotalBytes     int64
-	LayerBytes     int64
+	// SubjectDigest is the OCI manifest digest: the bundle's identity.
+	SubjectDigest string
+	TreeDigest    string
+	ConfigDigest  string
+	LayerDigest   string
+	// SpecDigest is the digest of the bundle manifest that was built from,
+	// computed over its normalized typed model.
+	//
+	// Named for the spec rather than the manifest because this result also
+	// carries an OCI manifest digest, four lines above, and in an OCI tool
+	// "manifest digest" means that one. A caller anchoring policy or
+	// provenance to the wrong object would get no type error. BuildRequest
+	// has said SpecPath and Spec all along.
+	SpecDigest string
+	LockDigest string
+	Format     string
+	FileCount  int64
+	TotalBytes int64
+	LayerBytes int64
 	// Reference is the canonical digest reference of what was published.
 	// A result always names its subject by digest, never by the tag it may
 	// also carry (DP-007).
@@ -257,21 +266,21 @@ func (c *Client) Build(ctx context.Context, req BuildRequest) (_ *BuildResult, r
 		"destination", published.String())
 
 	return &BuildResult{
-		SubjectDigest:  subject.ManifestDigest.String(),
-		TreeDigest:     subject.TreeDigest.String(),
-		ConfigDigest:   subject.ConfigDigest.String(),
-		LayerDigest:    subject.LayerDigest.String(),
-		ManifestDigest: resolved.manifestDigest.String(),
-		LockDigest:     lockDigest.String(),
-		Format:         subject.Config.Format.String(),
-		FileCount:      subject.Config.FileCount,
-		TotalBytes:     subject.Config.TotalSize,
-		LayerBytes:     subject.LayerSize,
-		Reference:      published.String(),
-		Tag:            tag,
-		Lock:           lock,
-		LockBytes:      lockBytes,
-		Evidence:       attached,
+		SubjectDigest: subject.ManifestDigest.String(),
+		TreeDigest:    subject.TreeDigest.String(),
+		ConfigDigest:  subject.ConfigDigest.String(),
+		LayerDigest:   subject.LayerDigest.String(),
+		SpecDigest:    resolved.specDigest.String(),
+		LockDigest:    lockDigest.String(),
+		Format:        subject.Config.Format.String(),
+		FileCount:     subject.Config.FileCount,
+		TotalBytes:    subject.Config.TotalSize,
+		LayerBytes:    subject.LayerSize,
+		Reference:     published.String(),
+		Tag:           tag,
+		Lock:          lock,
+		LockBytes:     lockBytes,
+		Evidence:      attached,
 	}, nil
 }
 
@@ -300,14 +309,16 @@ type LockRequest struct {
 
 // LockResult describes a lock.
 type LockResult struct {
-	Lock           *bundle.Lock
-	LockBytes      []byte
-	LockDigest     string
-	ManifestDigest string
-	TreeDigest     string
-	SourceCount    int
-	FileCount      int
-	OutputPath     string
+	Lock       *bundle.Lock
+	LockBytes  []byte
+	LockDigest string
+	// SpecDigest is the digest of the manifest that was resolved. Named as in
+	// BuildResult, for the same reason.
+	SpecDigest  string
+	TreeDigest  string
+	SourceCount int
+	FileCount   int
+	OutputPath  string
 	// Matched reports whether an existing lock already described this
 	// resolution. Under Check, a false value is a failure.
 	Matched bool
@@ -363,14 +374,14 @@ func (c *Client) Lock(ctx context.Context, req LockRequest) (_ *LockResult, retE
 	}
 
 	result := &LockResult{
-		Lock:           lock,
-		LockBytes:      lockBytes,
-		LockDigest:     lockDigest.String(),
-		ManifestDigest: resolved.manifestDigest.String(),
-		TreeDigest:     treeDigest.String(),
-		SourceCount:    len(lock.Sources),
-		FileCount:      len(lock.Files),
-		OutputPath:     outputPath,
+		Lock:        lock,
+		LockBytes:   lockBytes,
+		LockDigest:  lockDigest.String(),
+		SpecDigest:  resolved.specDigest.String(),
+		TreeDigest:  treeDigest.String(),
+		SourceCount: len(lock.Sources),
+		FileCount:   len(lock.Files),
+		OutputPath:  outputPath,
 	}
 
 	if req.Check {
