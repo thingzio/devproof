@@ -38,6 +38,24 @@ LDFLAGS       := -s -w \
 
 export PATH := $(TOOLS_DIR):$(PATH)
 
+# Each pinned tool is gated on a version-stamped sentinel rather than on the
+# binary itself. Keying the target on bin/tools/govulncheck meant that once the
+# file existed make considered it done forever: bumping the pin in
+# .versions.yaml reinstalled nothing locally while CI, starting from an empty
+# runner, got the new version. That is precisely the local-vs-CI drift this file
+# exists to prevent, and it is invisible -- the gate still passes, just with the
+# wrong tool.
+#
+# These must be defined above the rules that name them: make expands
+# prerequisites when it reads the rule, so a stamp defined further down the file
+# expands to the empty string and the tool dependency silently disappears.
+GOLANGCI_LINT_STAMP := $(TOOLS_DIR)/.golangci-lint-$(GOLANGCI_LINT)
+GOVULNCHECK_STAMP   := $(TOOLS_DIR)/.govulncheck-$(GOVULNCHECK)
+ACTIONLINT_STAMP    := $(TOOLS_DIR)/.actionlint-$(ACTIONLINT)
+GITLEAKS_STAMP      := $(TOOLS_DIR)/.gitleaks-$(GITLEAKS)
+SYFT_STAMP          := $(TOOLS_DIR)/.syft-$(SYFT)
+GRYPE_STAMP         := $(TOOLS_DIR)/.grype-$(GRYPE)
+
 ##@ General
 
 .PHONY: help
@@ -73,8 +91,8 @@ build: ## Compile all packages, and the CLI once it exists
 	fi
 
 .PHONY: clean
-clean: ## Remove build and coverage output
-	rm -rf $(BIN_DIR) $(COVERAGE_FILE) coverage.html sbom.json dist
+clean: ## Remove build and coverage output (keeps the pinned tool cache)
+	rm -rf $(BIN_DIR)/devproof $(COVERAGE_FILE) coverage.html sbom.json dist
 
 .PHONY: clean-all
 clean-all: clean ## Remove build output and the pinned tool cache
@@ -134,11 +152,11 @@ regen-golden: ## Regenerate golden vectors (only for a NEW format version)
 ##@ Lint
 
 .PHONY: lint
-lint: $(TOOLS_DIR)/golangci-lint ## Run golangci-lint
+lint: $(GOLANGCI_LINT_STAMP) ## Run golangci-lint
 	golangci-lint run --config .golangci.yaml
 
 .PHONY: fmt
-fmt: $(TOOLS_DIR)/golangci-lint ## Apply formatters
+fmt: $(GOLANGCI_LINT_STAMP) ## Apply formatters
 	golangci-lint fmt --config .golangci.yaml
 
 .PHONY: license
@@ -156,7 +174,7 @@ lint-yaml: ## Lint YAML with the pinned yamllint
 	yamllint --strict .
 
 .PHONY: lint-actions
-lint-actions: $(TOOLS_DIR)/actionlint ## Lint GitHub Actions workflows
+lint-actions: $(ACTIONLINT_STAMP) ## Lint GitHub Actions workflows
 	actionlint
 
 .PHONY: vet
@@ -180,7 +198,7 @@ vet: ## Run go vet
 VULN_ALLOWLIST := GO-2026-5932
 
 .PHONY: vuln
-vuln: $(TOOLS_DIR)/govulncheck ## Scan for known vulnerabilities
+vuln: $(GOVULNCHECK_STAMP) ## Scan for known vulnerabilities
 	@echo "accepted, unfixable findings: $(VULN_ALLOWLIST)"
 	@report="$$(govulncheck ./... 2>&1 || true)"; \
 	  found="$$(printf '%s\n' "$$report" | sed -n 's/^Vulnerability #[0-9]*: \(GO-[0-9-]*\).*/\1/p' | sort -u)"; \
@@ -200,16 +218,16 @@ vuln: $(TOOLS_DIR)/govulncheck ## Scan for known vulnerabilities
 	  fi
 
 .PHONY: sbom
-sbom: $(TOOLS_DIR)/syft ## Generate a CycloneDX SBOM
+sbom: $(SYFT_STAMP) ## Generate a CycloneDX SBOM
 	syft scan dir:. -o cyclonedx-json=sbom.json
 
 .PHONY: secrets
-secrets: $(TOOLS_DIR)/gitleaks ## Scan the working tree and full history for secrets
+secrets: $(GITLEAKS_STAMP) ## Scan the working tree and full history for secrets
 	gitleaks dir --no-banner --redact .
 	gitleaks git --no-banner --redact .
 
 .PHONY: scan
-scan: sbom $(TOOLS_DIR)/grype ## Scan the SBOM for vulnerabilities
+scan: sbom $(GRYPE_STAMP) ## Scan the SBOM for vulnerabilities
 	grype sbom:sbom.json --fail-on medium
 
 .PHONY: cover-check
@@ -267,26 +285,32 @@ bump-patch: ## Tag and push the next patch version (1.2.3 -> 1.2.4)
 $(TOOLS_DIR):
 	mkdir -p $(TOOLS_DIR)
 
-$(TOOLS_DIR)/golangci-lint: | $(TOOLS_DIR)
+$(GOLANGCI_LINT_STAMP): | $(TOOLS_DIR)
 	GOBIN=$(TOOLS_DIR) go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT)
+	rm -f $(TOOLS_DIR)/.golangci-lint-* && touch $@
 
-$(TOOLS_DIR)/govulncheck: | $(TOOLS_DIR)
+$(GOVULNCHECK_STAMP): | $(TOOLS_DIR)
 	GOBIN=$(TOOLS_DIR) go install golang.org/x/vuln/cmd/govulncheck@$(GOVULNCHECK)
+	rm -f $(TOOLS_DIR)/.govulncheck-* && touch $@
 
-$(TOOLS_DIR)/actionlint: | $(TOOLS_DIR)
+$(ACTIONLINT_STAMP): | $(TOOLS_DIR)
 	GOBIN=$(TOOLS_DIR) go install github.com/rhysd/actionlint/cmd/actionlint@$(ACTIONLINT)
+	rm -f $(TOOLS_DIR)/.actionlint-* && touch $@
 
-$(TOOLS_DIR)/gitleaks: | $(TOOLS_DIR)
+$(GITLEAKS_STAMP): | $(TOOLS_DIR)
 	GOBIN=$(TOOLS_DIR) go install github.com/zricethezav/gitleaks/v8@$(GITLEAKS)
+	rm -f $(TOOLS_DIR)/.gitleaks-* && touch $@
 
-$(TOOLS_DIR)/syft: | $(TOOLS_DIR)
+$(SYFT_STAMP): | $(TOOLS_DIR)
 	GOBIN=$(TOOLS_DIR) go install github.com/anchore/syft/cmd/syft@$(SYFT)
+	rm -f $(TOOLS_DIR)/.syft-* && touch $@
 
-$(TOOLS_DIR)/grype: | $(TOOLS_DIR)
+$(GRYPE_STAMP): | $(TOOLS_DIR)
 	GOBIN=$(TOOLS_DIR) go install github.com/anchore/grype/cmd/grype@$(GRYPE)
+	rm -f $(TOOLS_DIR)/.grype-* && touch $@
 
 .PHONY: tools
-tools: $(TOOLS_DIR)/golangci-lint $(TOOLS_DIR)/govulncheck $(TOOLS_DIR)/actionlint ## Install pinned dev tools
+tools: $(GOLANGCI_LINT_STAMP) $(GOVULNCHECK_STAMP) $(ACTIONLINT_STAMP) ## Install pinned dev tools
 
 .PHONY: print-versions
 print-versions: ## Print resolved tool versions

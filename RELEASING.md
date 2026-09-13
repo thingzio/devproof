@@ -13,16 +13,21 @@ make bump-minor   # v1.2.3 -> v1.3.0
 make bump-major   # v1.2.3 -> v2.0.0
 ```
 
-`tools/bump` refuses to tag a dirty tree, refuses to tag when there are
-unpushed commits, and runs `make qualify` before it tags anything. A tag names
-bytes other people will verify against, and it cannot be taken back, so the
-checks are enforced rather than listed. `SKIP_QUALIFY=1` exists for re-tagging
-a commit already known to be green; it is not for saving time.
+`tools/bump` refuses to tag from a branch other than `main`, refuses a dirty or
+untracked-file-carrying tree, refuses when the branch is ahead of or behind
+`origin`, and runs `make qualify` before it tags anything. A tag names bytes
+other people will verify against, and it cannot be taken back, so the checks are
+enforced rather than listed. `SKIP_QUALIFY=1` exists for re-tagging a commit
+already known to be green; it is not for saving time.
 
 A tag pointing at a commit that is not on `origin/main` produces a release
 nobody can reproduce from the public history -- which matters more here than
 most places, given what this project is for. That is why unpushed commits are
 refused rather than warned about.
+
+The branch and the tag are pushed with `git push --atomic`, so a race that
+rejects one rejects both: the remote never ends up carrying a tag that points at
+a commit nobody can fetch.
 
 ## What happens on the tag
 

@@ -1,93 +1,120 @@
 #!/bin/bash
+# Bumps the semver git tag (major|minor|patch) and pushes it, which triggers the
+# release workflow. Requires a clean, fully-pushed tree.
 set -euo pipefail
 
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=tools/common
 . "${DIR}/common"
 
 has_tools git
 
 bump_version() {
-  local bump_type=${1:-patch}
+	local bump_type=${1:-patch}
 
-  if ! git diff-index --quiet HEAD --; then
-    err "Working directory is not clean. Commit and push all changes before bumping version."
-  fi
+	# Releases cut from a non-default branch are almost always a mistake.
+	local branch
+	branch="$(git rev-parse --abbrev-ref HEAD)"
+	if [ "$branch" != "main" ]; then
+		err "Releases must be cut from 'main' (on '$branch'). Checkout main first."
+	fi
 
-  if [ "$(git rev-list @{u}..HEAD --count 2>/dev/null || echo 0)" -gt 0 ]; then
-    err "There are unpushed commits. Push all changes before bumping version."
-  fi
+	# Clean tree: no staged/unstaged changes AND no untracked files (the latter
+	# is not caught by diff-index, but a stray file can still end up in a build).
+	if ! git diff-index --quiet HEAD --; then
+		err "Working directory is not clean. Commit or stash changes before bumping version."
+	fi
+	if [ -n "$(git status --porcelain --untracked-files=normal)" ]; then
+		err "There are untracked files. Commit, stash, or clean them before bumping version."
+	fi
 
-  # A tag is the one action here that cannot be taken back: it names bytes
-  # other people will verify against. Running the gate rather than trusting
-  # that someone remembered to is the difference between a checklist and a
-  # guarantee. Set SKIP_QUALIFY=1 only when re-tagging a commit already known
-  # to be green.
-  if [ "${SKIP_QUALIFY:-0}" = "1" ]; then
-    msg "SKIP_QUALIFY=1 set; not running the qualification gate"
-  else
-    msg "Running the qualification gate before tagging"
-    make -C "${REPO_ROOT}" qualify || err "Qualification failed. Nothing was tagged."
-  fi
+	# In sync with upstream: neither ahead (unpushed) nor behind (stale).
+	git fetch --quiet origin || err "Unable to fetch origin to verify sync state."
+	if [ "$(git rev-list '@{u}..HEAD' --count 2>/dev/null || echo 0)" -gt 0 ]; then
+		err "There are unpushed commits. Push all changes before bumping version."
+	fi
+	if [ "$(git rev-list 'HEAD..@{u}' --count 2>/dev/null || echo 0)" -gt 0 ]; then
+		err "Local branch is behind origin. Pull before bumping version."
+	fi
 
-  local current_version=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+	local current_version
+	current_version=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
 
-  msg "Current version: $current_version"
+	msg "Current version: $current_version"
 
-  local version_without_v=${current_version#v}
-  local IFS='.'
-  read -ra version_parts <<< "$version_without_v"
-  local major=${version_parts[0]:-0}
-  local minor=${version_parts[1]:-0}
-  local patch=${version_parts[2]:-0}
+	if [[ ! "$current_version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+		err "Current version '$current_version' is not in semantic versioning format (vX.Y.Z)"
+	fi
 
-  if [[ ! "$current_version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-    err "Current version '$current_version' is not in semantic versioning format (x.y.z)"
-  fi
+	local version_without_v=${current_version#v}
+	local IFS='.'
+	read -ra version_parts <<<"$version_without_v"
+	local major=${version_parts[0]:-0}
+	local minor=${version_parts[1]:-0}
+	local patch=${version_parts[2]:-0}
 
-  case "$bump_type" in
-    major)
-      major=$((major + 1))
-      minor=0
-      patch=0
-      ;;
-    minor)
-      minor=$((minor + 1))
-      patch=0
-      ;;
-    patch)
-      patch=$((patch + 1))
-      ;;
-    *)
-      err "Invalid bump type '$bump_type'. Use: major, minor, or patch"
-      ;;
-  esac
+	case "$bump_type" in
+	major)
+		major=$((major + 1))
+		minor=0
+		patch=0
+		;;
+	minor)
+		minor=$((minor + 1))
+		patch=0
+		;;
+	patch)
+		patch=$((patch + 1))
+		;;
+	*)
+		err "Invalid bump type '$bump_type'. Use: major, minor, or patch"
+		;;
+	esac
 
-  local new_version="v${major}.${minor}.${patch}"
+	local new_version="v${major}.${minor}.${patch}"
 
-  if git tag --list | grep -q "^${new_version}$"; then
-    err "Version tag '${new_version}' already exists locally."
-  fi
+	if git tag --list | grep -q "^${new_version}$"; then
+		err "Version tag '${new_version}' already exists locally."
+	fi
 
-  if git ls-remote --tags origin | grep -q "refs/tags/${new_version}$"; then
-    err "Version tag '${new_version}' already exists on remote."
-  fi
+	if git ls-remote --tags origin | grep -q "refs/tags/${new_version}$"; then
+		err "Version tag '${new_version}' already exists on remote."
+	fi
 
-  msg "Bumping $bump_type version: $current_version → $new_version"
+	# A tag is the one action here that cannot be taken back: it names bytes
+	# other people will verify against. Running the gate rather than trusting
+	# that someone remembered to is the difference between a checklist and a
+	# guarantee. Set SKIP_QUALIFY=1 only when re-tagging a commit already known
+	# to be green.
+	if [ "${SKIP_QUALIFY:-0}" = "1" ]; then
+		msg "SKIP_QUALIFY=1 set; not running the qualification gate"
+	else
+		msg "Running the qualification gate before tagging"
+		make -C "${REPO_ROOT}" qualify || err "Qualification failed. Nothing was tagged."
+	fi
 
-  git tag -s -a "$new_version" -m "Release $new_version"
-  git push origin HEAD
-  git push origin "$new_version"
+	msg "Bumping $bump_type version: $current_version → $new_version"
+
+	git tag -s -a "$new_version" -m "Release $new_version"
+	# Push HEAD and the tag in one atomic transaction: with --atomic, if either
+	# ref is rejected (e.g. a race pushed main), neither lands — so we never end
+	# up with a tag on the remote pointing at an unpushed commit. On failure,
+	# drop the local tag so a re-run starts clean.
+	if ! git push --atomic origin HEAD "refs/tags/${new_version}"; then
+		git tag -d "$new_version" >/dev/null 2>&1 || true
+		err "Atomic push of branch + tag '${new_version}' failed; local tag removed. Resolve and retry."
+	fi
 }
 
 if [ $# -eq 0 ]; then
-  echo "Usage: $0 <bump_type>"
-  echo "Bump types: major, minor, patch"
-  echo ""
-  echo "Examples:"
-  echo "  $0 patch   # v1.2.3 → v1.2.4"
-  echo "  $0 minor   # v1.2.3 → v1.3.0"
-  echo "  $0 major   # v1.2.3 → v2.0.0"
-  exit 1
+	echo "Usage: $0 <bump_type>"
+	echo "Bump types: major, minor, patch"
+	echo ""
+	echo "Examples:"
+	echo "  $0 patch   # v1.2.3 → v1.2.4"
+	echo "  $0 minor   # v1.2.3 → v1.3.0"
+	echo "  $0 major   # v1.2.3 → v2.0.0"
+	exit 1
 fi
 
 bump_version "$1"

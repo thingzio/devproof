@@ -260,4 +260,5 @@ privately.
 
 ## License
 
-[Apache License 2.0](LICENSE).
+[Apache License 2.0](LICENSE). Dependency licenses and notices are reproduced
+in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

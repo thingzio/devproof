@@ -86,7 +86,8 @@ git push --force-with-lease
 
 ## Getting started
 
-You need Go (the version in `go.mod`), Docker, and `make`. **You do not need a
+You need Go (the version in `.go-version`), Docker, and `make`. Pinned linters
+and scanners install themselves into `bin/tools` on first use. **You do not need a
 Google Cloud account, and you do not need any credentials from the maintainer.**
 If you hit a step that seems to require either, that is a bug — please file it.
 
