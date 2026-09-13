@@ -41,88 +41,62 @@ jobs:
         # the specification rather than matching the code that produced it.
         run: go test ./pkg/conformance/...
 
-  release:
-    needs: verify
+  # .versions.yaml stays authoritative for the tools that build a release.
+  #
+  # Without this the shared workflow falls back to thingzio/actions' own pins,
+  # and the versions declared here would become documentation of something that
+  # no longer happens -- `make sbom` would catalog with one syft and the release
+  # with another, which is the drift .versions.yaml exists to prevent.
+  #
+  # cosign is deliberately not passed. The shared workflow holds it at >= v3.1.0
+  # because below that cosign writes a Rekor entry type sigstore-go cannot
+  # verify, and that constraint belongs with the code that depends on it.
+  versions:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      # Keyless signing exchanges this token for a Fulcio certificate. No
-      # private key exists to leak, and the resulting certificate names the
-      # workflow that produced the release.
-      id-token: write
-      attestations: write
+    timeout-minutes: 5
+    outputs:
+      goreleaser: ${{ steps.read.outputs.goreleaser }}
+      syft: ${{ steps.read.outputs.syft }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
-          fetch-depth: 0
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
-        with:
-          go-version-file: .go-version
-          check-latest: true
-      - id: versions
+          persist-credentials: false
+      - id: read
         uses: ./.github/actions/load-versions
 
-      - uses: anchore/sbom-action/download-syft@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26  # v0.24.2
-        with:
-          syft-version: ${{ steps.versions.outputs.syft }}
-      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6  # v4.1.2
-
-      - name: goreleaser
-        uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94  # v7.2.3
-        with:
-          version: ${{ steps.versions.outputs.goreleaser }}
-          args: release --clean
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # The tag that triggered this run, stated rather than inferred.
-          # goreleaser otherwise resolves the current tag with `git describe`,
-          # which is ambiguous when two tags share a commit -- cutting v0.1.0
-          # on the same commit as v0.1.0-rc.1 made it pick the release
-          # candidate and try to overwrite an immutable release.
-          GORELEASER_CURRENT_TAG: ${{ github.ref_name }}
-          # A fine-grained PAT with contents:write on thingzio/homebrew-tap.
-          # Absent, .goreleaser.yaml skips the cask entirely rather than
-          # failing a cross-repo push, so a release works before this is set.
-          HOMEBREW_DEPLOY_KEY: ${{ secrets.HOMEBREW_DEPLOY_KEY }}
-
-      # Provenance attests what built the archives and from which source. It
-      # is produced by the workflow rather than by the build, so a compromised
-      # build step cannot forge it.
-      - name: attest build provenance
-        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8  # v4.2.2
-        with:
-          subject-path: 'dist/*.tar.gz'
-
-      - name: verify the release signature
-        # Verified here rather than assumed: a signature nobody checks is a
-        # signature nobody knows is broken. This fails the release rather than
-        # publishing artifacts whose signature does not verify.
-        run: |
-          cosign verify-blob dist/checksums.txt \
-            --bundle dist/checksums.txt.bundle \
-            --certificate-identity-regexp \
-              "https://github\.com/${GITHUB_REPOSITORY}/\.github/workflows/release\.yaml@.*" \
-            --certificate-oidc-issuer https://token.actions.githubusercontent.com
-
-  # goreleaser creates the release as a draft (`draft: true` in
-  # .goreleaser.yaml) so a release is never published before its signature has
-  # been verified above. Publishing is therefore a separate job -- without it
-  # the release stays a draft forever, which is invisible to everyone but
-  # repository collaborators and makes a repo with releases look like it has
-  # none.
+  # Building, signing, attesting and publishing all happen in the shared build
+  # definition. This used to be three jobs here; the reason it is one call is
+  # not tidiness.
   #
-  # This is the same gap that left 55 devradar releases unpublished. Added here
-  # before the first tag rather than after.
-  publish:
-    needs: release
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
+  # goreleaser runs this repository's own hooks. When the build and the OIDC
+  # token live in the same job -- as they did here -- a hook could take the
+  # token and mint provenance naming this workflow as the builder for bytes it
+  # never produced. That is the forgery SLSA Build Level 3 excludes, and it is
+  # why the old shape was Level 2: the certificate's Build Signer URI and Build
+  # Config URI were both this file.
+  #
+  # In release-go.yaml the signing identity lives in a job that runs no code
+  # from this repository at all, so Fulcio records thingzio/actions as the
+  # signer and this repository as the entry point. Consumers verify with
+  # --signer-workflow, which is the difference made checkable.
+  #
+  # Pinned by commit SHA, not by tag: a floating tag is a build definition
+  # someone can move, which is the mutable-builder problem Level 3 exists to
+  # exclude.
+  release:
+    needs: [verify, versions]
     permissions:
       contents: write
-    steps:
-      - name: Publish release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GH_REPO: ${{ github.repository }}
-          TAG: ${{ github.ref_name }}
-        run: gh release edit "$TAG" --draft=false
+      # Granted to the called workflow, not used here. Only its attest job
+      # receives it, and that job runs no code from this repository.
+      id-token: write
+      attestations: write
+    uses: thingzio/actions/.github/workflows/release-go.yaml@960a5cffeb70c09b4d9c4522186794cb126518e9  # v1.6.0
+    with:
+      goreleaser_version: ${{ needs.versions.outputs.goreleaser }}
+      syft_version: ${{ needs.versions.outputs.syft }}
+    secrets:
+      # A fine-grained PAT with contents:write on thingzio/homebrew-tap.
+      # Absent, .goreleaser.yaml skips the cask entirely rather than failing a
+      # cross-repo push, so a release works before this is set.
+      homebrew_deploy_key: ${{ secrets.HOMEBREW_DEPLOY_KEY }}
