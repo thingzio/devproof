@@ -186,6 +186,11 @@
         "allowTagFallback": {
           "type": "boolean",
           "description": "Permit evidence stored under the fallback tag scheme on registries without the referrers API. Off by default, because that mode cannot express a set and silently replaces (DP-028)."
+        },
+        "maxAge": {
+          "type": "string",
+          "pattern": "^$|^[0-9]+(\\.[0-9]+)?(ns|us|ms|s|m|h)([0-9]+(\\.[0-9]+)?(ns|us|ms|s|m|h))*$",
+          "description": "Bound how old accepted evidence may be, as a Go duration such as \"720h\". Measured from an authenticated signing time against the evaluation clock; evidence carrying no authenticated time cannot satisfy the rule. Unset, or the empty string a Go decoder cannot distinguish from absent, means age is not considered."
         }
       }
     },

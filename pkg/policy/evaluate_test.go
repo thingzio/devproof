@@ -19,6 +19,7 @@ package policy_test
 import (
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/thingzio/devproof/pkg/bundle"
 	"github.com/thingzio/devproof/pkg/evidence"
@@ -281,5 +282,93 @@ func TestSourceRulesDoNotPassVacuously(t *testing.T) {
 	}))
 	if report.Trust == policy.StatusPass {
 		t.Error("source restrictions were satisfied by provenance claiming no sources")
+	}
+}
+
+// freshnessCase shapes one evidence-age scenario.
+type freshnessCase struct {
+	name     string
+	maxAge   string
+	signedAt *time.Time
+	wantPass bool
+}
+
+// TestEvidenceAgeIsEnforced covers a rule the documentation promised and
+// nothing applied.
+//
+// An authenticated signing time was carried all the way into the policy input
+// and a finding code named evidence-expired already existed, but no rule ever
+// read either. A policy could not express "this attestation is too old to rely
+// on", so evidence signed by a key that was rotated years ago was as good as
+// one signed this morning.
+func TestEvidenceAgeIsEnforced(t *testing.T) {
+	t.Parallel()
+
+	evaluatedAt := time.Date(2026, 3, 1, 12, 0, 0, 0, time.UTC)
+	fresh := evaluatedAt.Add(-1 * time.Hour)
+	stale := evaluatedAt.Add(-48 * time.Hour)
+
+	for _, tc := range []freshnessCase{
+		{"no rule and no signing time", "", nil, true},
+		{"no rule and an old signature", "", &stale, true},
+		{"fresh evidence", "24h", &fresh, true},
+		{"stale evidence", "24h", &stale, false},
+		{"no authenticated time", "24h", nil, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			doc := provenancePolicy(nil)
+			doc.Spec.Evidence.MaxAge = tc.maxAge
+
+			input := provenanceInput(nil)
+			input.EvaluatedAt = evaluatedAt
+			input.Evidence[0].IntegratedTime = tc.signedAt
+
+			report := policy.Evaluate(doc, input)
+			if passed := report.Trust == policy.StatusPass; passed != tc.wantPass {
+				t.Errorf("trust pass=%v, want %v: %v", passed, tc.wantPass, report.Findings)
+			}
+		})
+	}
+}
+
+// TestEvidenceAgeNeedsAnEvaluationTime fails closed on an SDK caller who
+// configures the rule and leaves Input.EvaluatedAt zero.
+//
+// Measuring age against the zero time would make every signature astronomically
+// old, or -- read the other way -- would invite defaulting to now and silently
+// producing a different answer than the caller's own clock.
+func TestEvidenceAgeNeedsAnEvaluationTime(t *testing.T) {
+	t.Parallel()
+
+	doc := provenancePolicy(nil)
+	doc.Spec.Evidence.MaxAge = "24h"
+
+	signedAt := time.Now()
+	input := provenanceInput(nil)
+	input.Evidence[0].IntegratedTime = &signedAt
+
+	report := policy.Evaluate(doc, input)
+	if report.Trust == policy.StatusPass {
+		t.Error("an age rule was evaluated with no evaluation time and passed")
+	}
+}
+
+// TestEvidenceMaxAgeIsValidatedAtLoad keeps a malformed duration from becoming
+// a mid-verification decision about what an unparseable rule means.
+func TestEvidenceMaxAgeIsValidatedAtLoad(t *testing.T) {
+	t.Parallel()
+
+	for _, value := range []string{"30 days", "-24h", "0s", "24"} {
+		t.Run(value, func(t *testing.T) {
+			t.Parallel()
+
+			doc := provenancePolicy(nil)
+			doc.Spec.Evidence.MaxAge = value
+			if err := doc.Validate(); err == nil {
+				t.Errorf("evidence.maxAge %q loaded", value)
+			}
+		})
 	}
 }

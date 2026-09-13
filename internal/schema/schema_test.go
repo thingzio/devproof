@@ -199,7 +199,7 @@ const validPolicy = `{
         "requireImmutableResolution": true
       }
     },
-    "evidence": { "rejectInvalidMatchingEvidence": true },
+    "evidence": { "rejectInvalidMatchingEvidence": true, "maxAge": "720h" },
     "limits": { "maxFiles": 10000, "maxExpandedBytes": 1073741824 }
   }
 }`
@@ -363,6 +363,59 @@ func TestRequiredFieldsRejectedByBoth(t *testing.T) {
 						t.Errorf("decoder accepted a document missing required %q", field)
 					}
 				})
+			}
+		})
+	}
+}
+
+// TestEvidenceMaxAgeAgreesWithTheLoader keeps the schema's duration pattern
+// from drifting away from what the loader accepts.
+//
+// A schema that blessed "30 days" would let an editor approve a policy the
+// loader then refuses, and one that flagged "720h" would condemn a policy that
+// works. Either direction turns the published schema into a document that
+// describes something other than the implementation.
+//
+// The empty string is accepted by both: a Go decoder cannot tell it from an
+// absent field, so a schema that rejected it would describe a distinction
+// nothing can make.
+func TestEvidenceMaxAgeAgreesWithTheLoader(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		value string
+		valid bool
+	}{
+		{"720h", true},
+		{"1h30m", true},
+		{"90m", true},
+		{"", true},
+		{"30 days", false},
+		{"24", false},
+		{"-24h", false},
+	} {
+		t.Run(tc.value, func(t *testing.T) {
+			t.Parallel()
+
+			var document map[string]any
+			if err := json.Unmarshal([]byte(validPolicy), &document); err != nil {
+				t.Fatalf("decoding fixture: %v", err)
+			}
+			spec, _ := document["spec"].(map[string]any)
+			spec["evidence"] = map[string]any{"maxAge": tc.value}
+
+			mutated, err := json.Marshal(document)
+			if err != nil {
+				t.Fatalf("re-encoding: %v", err)
+			}
+
+			bySchema := compile(t, schema.VerificationPolicy).
+				Validate(asJSONValue(t, mutated)) == nil
+			if bySchema != tc.valid {
+				t.Errorf("schema accepted=%v, want %v", bySchema, tc.valid)
+			}
+			if byLoader := parsePolicy(mutated) == nil; byLoader != tc.valid {
+				t.Errorf("loader accepted=%v, want %v", byLoader, tc.valid)
 			}
 		})
 	}

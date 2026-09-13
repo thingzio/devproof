@@ -133,9 +133,8 @@ Provenance policy may require:
 - an accepted DevProof and resolver version range;
 - allowed source types or hosts;
 - immutable source resolutions;
-- matching per-source tree digests;
-- absence of unapproved source types; and
-- a maximum evidence age when an authenticated time is available.
+- matching per-source tree digests; and
+- absence of unapproved source types.
 
 Claims are cross-checked against what verification established. Provenance
 naming a tree digest or bundle format other than the subject's own is a
@@ -171,6 +170,30 @@ Evaluation therefore:
 `rejectInvalidMatchingEvidence` determines whether malformed evidence that
 claims a required type is itself fatal. Even when false, policy fails if the
 remaining verified evidence cannot satisfy its requirements.
+
+## Evidence age
+
+`evidence.maxAge` bounds how old the evidence being relied on may be, written
+as a Go duration such as `720h`:
+
+```yaml
+spec:
+  evidence:
+    maxAge: 720h
+```
+
+The rule applies to accepted evidence. Age is measured from an authenticated
+signing time against the evaluation clock, never from a date the evidence
+asserts about itself — an attacker replaying an old attestation writes whatever
+date suits them. Evidence carrying no authenticated time cannot satisfy the
+rule and is refused: treating "unknown" as "recent" would make the bound
+useless against the only adversary who cares about it.
+
+Unset means age is not considered, which is often right. A signature does not
+expire on its own, and a build attestation stays true. The rule is for facts
+whose truth decays even though their bytes do not.
+
+A failing evidence-age rule reports `evidence-expired`.
 
 ## Time
 

@@ -27,6 +27,9 @@ import (
 	"github.com/thingzio/devproof/pkg/evidence"
 )
 
+// ruleEvidenceMaxAge is the policy path the freshness findings report.
+const ruleEvidenceMaxAge = "evidence.maxAge"
+
 // VerifiedEvidence is one evidence object whose signatures have been checked.
 //
 // Nothing reaches this type without a verifier having established its
@@ -112,6 +115,7 @@ func Evaluate(doc *Document, input Input) *Report {
 
 	evaluateSubject(doc, input, report)
 	accepted := evaluateSignatures(doc, input, report)
+	evaluateFreshness(doc, input, accepted, report)
 	evaluateProvenance(doc, input, accepted, report)
 	evaluateCandidates(doc, input, report)
 
@@ -256,6 +260,72 @@ func matchIdentity(rules []IdentityRule, identity evidence.Identity) (string, bo
 		}
 	}
 	return "", false
+}
+
+// evaluateFreshness bounds how old the evidence being relied on may be.
+//
+// It applies to accepted evidence only: evidence nothing is relying on has no
+// age worth judging, and whether any evidence is required at all is what the
+// signature and provenance rules say.
+//
+// Age is measured from an authenticated signing time against the evaluation's
+// single clock reading, so two rules in one run cannot disagree about now.
+// Nothing here reads a timestamp the evidence asserts about itself -- an
+// attacker replaying an old attestation writes whatever date suits them.
+func evaluateFreshness(doc *Document, input Input, accepted []VerifiedEvidence, report *Report) {
+	rules := doc.Spec.Evidence
+	if rules.MaxAge == "" {
+		return
+	}
+
+	// Re-parsed rather than assumed valid. Document.Validate rejects a
+	// malformed duration at load, but an SDK caller can hand Evaluate a
+	// document it never saw, and a rule that cannot be understood must not be
+	// a rule that passes.
+	maxAge, err := rules.maxAge()
+	if err != nil {
+		report.AddFinding(Finding{
+			Code: FindingEvidenceExpired, Rule: ruleEvidenceMaxAge, Severity: SeverityError,
+			Subject: input.SubjectDigest, Message: err.Error(),
+		})
+		return
+	}
+
+	if input.EvaluatedAt.IsZero() {
+		report.AddFinding(Finding{
+			Code: FindingEvidenceExpired, Rule: ruleEvidenceMaxAge, Severity: SeverityError,
+			Subject: input.SubjectDigest,
+			Message: "the policy bounds evidence age, and this evaluation carries no " +
+				"evaluation time to measure it against",
+		})
+		return
+	}
+
+	for _, item := range accepted {
+		if item.IntegratedTime == nil {
+			// Refused, not waved through. Evidence with no trusted time is
+			// precisely what an age rule exists to catch, and treating
+			// "unknown" as "recent" would make the rule useless against the
+			// only adversary who cares about it.
+			report.AddFinding(Finding{
+				Code: FindingEvidenceExpired, Rule: ruleEvidenceMaxAge, Severity: SeverityError,
+				Subject: item.Digest,
+				Message: "the policy bounds evidence age, and this evidence carries no " +
+					"authenticated signing time",
+			})
+			continue
+		}
+		age := input.EvaluatedAt.Sub(*item.IntegratedTime)
+		if age > maxAge {
+			report.AddFinding(Finding{
+				Code: FindingEvidenceExpired, Rule: ruleEvidenceMaxAge, Severity: SeverityError,
+				Subject: item.Digest,
+				Message: fmt.Sprintf("this evidence was signed at %s, %s before evaluation, "+
+					"and the policy allows %s",
+					item.IntegratedTime.UTC().Format(time.RFC3339), age, maxAge),
+			})
+		}
+	}
 }
 
 func evaluateProvenance(doc *Document, input Input, accepted []VerifiedEvidence, report *Report) {

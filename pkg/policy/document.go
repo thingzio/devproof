@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 
@@ -146,6 +147,20 @@ type EvidenceRules struct {
 	// on registries without the referrers API (DP-028). Off by default,
 	// because that mode cannot express a set and silently replaces.
 	AllowTagFallback bool `json:"allowTagFallback,omitempty" yaml:"allowTagFallback,omitempty"`
+	// MaxAge bounds how old accepted evidence may be, as a Go duration such
+	// as "720h".
+	//
+	// Measured from an authenticated signing time, never from something the
+	// evidence asserts about itself. Evidence with no authenticated time
+	// cannot satisfy this rule and is refused rather than waved through: a
+	// missing trusted time source is exactly the case an age rule exists to
+	// catch, and treating "unknown" as "recent" would make the rule useless
+	// against the only adversary who cares about it.
+	//
+	// Unset means age is not considered. A signature does not expire on its
+	// own, and for a build attestation that is often right -- this is for the
+	// facts whose truth decays even though their bytes do not.
+	MaxAge string `json:"maxAge,omitempty" yaml:"maxAge,omitempty"`
 }
 
 // ParseDocument decodes and validates a policy from YAML or JSON.
@@ -224,7 +239,32 @@ func (d *Document) Validate() error {
 	if err := d.Spec.Limits.Validate(); err != nil {
 		return err
 	}
+	if _, err := d.Spec.Evidence.maxAge(); err != nil {
+		return err
+	}
 	return nil
+}
+
+// maxAge parses the configured evidence age bound.
+//
+// Parsed at load time so a malformed duration fails where somebody can fix
+// it, rather than in the middle of a verification that then has to decide
+// what an unparseable rule means.
+func (r EvidenceRules) maxAge() (time.Duration, error) {
+	if r.MaxAge == "" {
+		return 0, nil
+	}
+	d, err := time.ParseDuration(r.MaxAge)
+	if err != nil {
+		return 0, fault.Wrap(fault.CodeInvalidInput, documentOp,
+			fmt.Sprintf("evidence.maxAge %q is not a duration", r.MaxAge), err)
+	}
+	if d <= 0 {
+		return 0, fault.New(fault.CodeInvalidInput, documentOp,
+			fmt.Sprintf("evidence.maxAge is %s; a bound that no evidence could satisfy "+
+				"is indistinguishable from one that is working", d))
+	}
+	return d, nil
 }
 
 func (r *SignatureRules) validate() error {

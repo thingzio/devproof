@@ -89,8 +89,11 @@ validation. A document that validates is well-formed, not necessarily valid.
 
 - `signatures.threshold` must not exceed the number of listed identities — a
   threshold nothing could satisfy is indistinguishable from a policy that is
-  working; and
-- `subjectPattern` must be a valid regular expression.
+  working;
+- `subjectPattern` must be a valid regular expression; and
+- `evidence.maxAge` is measured from an authenticated signing time, so evidence
+  carrying none fails the rule rather than satisfying it. The pattern here
+  constrains the spelling of the duration, not what it means.
 
 The path and sorting rules are the ones worth knowing about, because they are
 what make a config describe exactly one archive. JSON Schema can say an array
