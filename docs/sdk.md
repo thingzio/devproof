@@ -2,9 +2,11 @@
 
 ## API status
 
-The APIs in this document are proposed implementation targets, not a released
-compatibility promise. The first implementation should preserve the operation
-boundaries even if individual Go names change during development.
+These APIs ship. The module is `v1alpha1` and, until 1.0, a minor version may
+carry a breaking change; see [compatibility](compatibility.md).
+
+Where this document and the code disagree, the code is right and this document
+is a bug.
 
 ## Principles
 
@@ -35,10 +37,16 @@ func (c *Client) Close() error
 
 func (c *Client) Lock(ctx context.Context, req LockRequest) (*LockResult, error)
 func (c *Client) Build(ctx context.Context, req BuildRequest) (*BuildResult, error)
-func (c *Client) Verify(ctx context.Context, req VerifyRequest) (*VerifyResult, error)
+func (c *Client) Verify(ctx context.Context, req VerifyRequest) (*policy.Report, error)
 func (c *Client) Expand(ctx context.Context, req ExpandRequest) (*ExpandResult, error)
+func (c *Client) Diff(ctx context.Context, req DiffRequest) (*DiffResult, error)
+func (c *Client) Copy(ctx context.Context, req CopyRequest) (*CopyResult, error)
 func (c *Client) Inspect(ctx context.Context, req InspectRequest) (*InspectResult, error)
 ```
+
+A starter manifest comes from `bundle.Template`, which returns the commented
+document `devproof init` writes. It is a package function rather than a client
+method because it performs no I/O and needs no configuration.
 
 `Close` releases client-owned transports, credential providers, and caches. It
 does not remove caller-owned artifacts or output directories. Calls after
@@ -268,6 +276,25 @@ not the same guarantee as never having written it (DP-032).
 `ExpandResult` is returned only after atomic publication. It contains the
 subject and tree digests, destination, file count, byte total, and verification
 summary.
+
+### Diff
+
+`DiffRequest` names two operands. Each is either an OCI reference — anything
+carrying a `://` scheme — or a path to a local directory, which is
+canonicalized through the same composition path a build uses.
+
+`DiffResult` reports each side's tree digest, kind, and file count, an
+`Identical` flag derived from the tree digests, and the changed paths sorted
+by canonical path. Each change is classified `added`, `removed`, `modified`,
+or `mode-changed`, and carries both sides' mode, size, and digest so the
+classification can be checked rather than trusted.
+
+`Identical` and an empty change list always agree, because the tree digest is
+a function of exactly the paths, modes, sizes, and content digests the
+comparison walks.
+
+Differences are not an error: `Diff` returns a result. The CLI is what turns
+that result into exit 1.
 
 ### Inspect
 

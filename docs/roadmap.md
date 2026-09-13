@@ -3,6 +3,14 @@
 The roadmap orders work by dependency and risk. It intentionally establishes
 canonical bytes and safe read behavior before registry publication or signing.
 
+**Phases 0 through 6 are delivered.** They are kept here because the exit
+criteria are the standing definition of done for the format and the API, and
+because the order explains why the codebase is shaped the way it is. What
+remains open is the "Explicitly deferred" list at the end, plus the two items
+named there as prerequisites for calling the format stable: a published
+predicate schema, and a second independent read implementation beyond
+`pkg/conformance`.
+
 ## Phase 0: Freeze the implementable design
 
 Deliver:
@@ -194,7 +202,9 @@ manifest with path and Git sources
 - policy distribution or remote policy service;
 - daemon, controller, or continuous synchronization modes;
 - garbage collection of registry content; and
-- semantic `diff` beyond canonical inventory changes.
+- semantic `diff` beyond canonical inventory changes. The inventory-level
+  comparison shipped as `devproof diff`; what stays deferred is interpreting
+  the payload, which needs the semantic validator first (DP-026).
 
 Deferred features should be promoted only from a concrete consumer requirement
 and must preserve the accepted design decisions or explicitly revise them.

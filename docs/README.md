@@ -1,6 +1,6 @@
 # DevProof design
 
-Status: pre-implementation design for the first public format and API.
+Status: implemented and released. These documents describe what ships.
 
 DevProof is a Go SDK and CLI that resolves content from one or more sources,
 composes it into a canonical filesystem tree, packages that tree as an OCI
@@ -77,6 +77,8 @@ adding or replacing evidence does not change the subject digest.
 
 ## Documentation map
 
+- [JSON Schemas](../schemas/): normative schemas for the manifest, lock,
+  policy, and config documents, and what they cannot express.
 - [Decisions](decisions.md): accepted v1 decisions and unresolved choices.
 - [Architecture](architecture.md): components, data flow, ownership, and failure
   behavior.

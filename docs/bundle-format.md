@@ -1,7 +1,11 @@
 # DevProof bundle format v1
 
-Status: proposed normative format. Golden vectors must be added before the
-format is declared stable.
+Status: normative and frozen. Golden vectors are committed under
+`internal/canonical/testdata/format/v1` and gate every push; the config blob
+additionally has a published
+[JSON Schema](../schemas/bundle-config.v1.schema.json). The format is not yet
+declared *stable* — see [compatibility](compatibility.md) for what that will
+add — but its bytes are fixed, and changing one is a new format version.
 
 ## Format objectives
 
@@ -150,10 +154,12 @@ File entries are sorted by canonical path bytes. The config contains no bundle
 name, source identity, timestamp, builder identity, registry reference, tag,
 annotation, or signature.
 
-The complete JSON Schema and a maximum config size must be finalized before
-v1 stability. Readers reject unknown schema versions, duplicate paths,
-non-canonical ordering, invalid modes, invalid digests, inconsistent totals,
-and unknown required semantics.
+The complete grammar is the
+[bundle-config schema](../schemas/bundle-config.v1.schema.json), and the
+maximum config size is `maxConfigBytes` (DP-020). Readers reject unknown
+schema versions, duplicate paths, non-canonical ordering, invalid modes,
+invalid digests, inconsistent totals, and unknown required semantics — the
+last four of which the schema cannot express, so they stay the reader's job.
 
 ## Canonical tar layer
 
@@ -254,8 +260,9 @@ Evidence may include time. Signatures and transparency-log material are
 expected to vary. None of these bytes are part of the subject.
 
 Signed provenance uses an in-toto Statement v1 in a DSSE-compatible Sigstore
-bundle. The exact predicate schema and referrer media types must be frozen
-before the evidence API is declared stable.
+bundle. The predicate type and referrer media types are fixed by DP-024 and
+DP-027; the predicate's own field schema is not yet published, and doing so is
+a prerequisite for declaring the evidence API stable.
 
 Evidence is stored through the OCI subject/referrers relationship. Offline
 export uses an OCI image layout containing the subject and selected referrers.

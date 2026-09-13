@@ -15,7 +15,7 @@ Tests must demonstrate, rather than assume:
 
 ## Normative golden vectors
 
-`testdata/format/v1` will contain human-readable source fixtures and expected:
+`internal/canonical/testdata/format/v1` holds the fixtures and expected:
 
 - normalized file inventory;
 - binary tree-record stream;

@@ -17,10 +17,10 @@ DevProof gives that pile a **name derived from its content** — a digest that i
 the same on every machine, forever — then lets you attach signed evidence to
 that name and check it against your own rules before anything touches disk.
 
-> **Status:** implemented and tested, no tagged release yet. The Go API is
-> `v1alpha1`. The bundle format is frozen but not yet declared stable; see
-> [compatibility](docs/compatibility.md) for what each version number will
-> promise.
+> **Status:** released and in use. The Go API is `v1alpha1` and, until 1.0,
+> a minor version may carry a breaking change. The bundle format is frozen
+> but not yet declared stable; see [compatibility](docs/compatibility.md) for
+> what each version number promises.
 
 ## Install
 
@@ -41,6 +41,11 @@ use WSL ([DP-035](docs/decisions.md)).
 ## Quickstart
 
 ```console
+$ devproof init --src ./content
+manifest:        devproof.yaml
+source:          ./content
+next:            edit metadata.name, then run devproof lock
+
 $ devproof build ./content --to oci-layout://./artifact --tag v1
 reference:       oci-layout://./artifact@sha256:e3d8f68bd8c485...
 subject:         sha256:e3d8f68bd8c485...
@@ -55,10 +60,20 @@ trust:           not-evaluated
 semantics:       not-evaluated
 
 $ devproof expand oci-layout://./artifact:v1 --to ./expanded
+
+$ devproof diff oci-layout://./artifact:v1 ./content
+from:            sha256:168de0126f4a8c...
+to:              sha256:168de0126f4a8c...
+result:          identical
 ```
 
 Run the build again — different directory, different machine, next year — and
 the subject digest is the same. Everything else here rests on that.
+
+`devproof init` writes a commented manifest so a first one does not require
+reading a schema, and `devproof diff` answers "has anything changed since I
+built this?" — exit `0` when the two sides are identical, exit `1` when they
+differ.
 
 Swap `oci-layout://` for `oci://registry.example.com/team/config` to work
 against a registry. Credentials come from your Docker configuration, so
@@ -247,6 +262,7 @@ report, err := conformance.VerifyLayout("./artifact", "v1")
 | [Go SDK](docs/sdk.md) · [CLI](docs/cli.md) | operations, errors, exit codes, streams |
 | [Verification policy](docs/policy.md) | trust rules and result semantics |
 | [Security](docs/security.md) | threat model, trust boundaries, safe extraction |
+| [JSON Schemas](schemas/) | normative schemas for every document, and what they cannot express |
 | [Decisions](docs/decisions.md) | every accepted design decision, and why |
 | [Compatibility](docs/compatibility.md) | what each version number promises |
 | [Interoperability](docs/interoperability.md) | verified results against other tooling |

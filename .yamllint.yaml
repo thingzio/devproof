@@ -4,6 +4,13 @@ ignore:
   - vendor/
   - dist/
   - bin/
+  # The manifest template `devproof init` writes. Its commented-out second
+  # source is indented for the line it becomes when uncommented, which reads
+  # to comments-indentation as a misaligned comment. Style linting adds
+  # nothing here: a test parses this file with bundle.ParseSpec and asserts
+  # it satisfies the published schema, which is a stronger check than any
+  # rule below.
+  - pkg/bundle/template.yaml
 
 rules:
   line-length: disable

@@ -344,6 +344,17 @@ The CLI maps every typed SDK code onto the documented exit codes:
 130 canceled, when caused by SIGINT
 ```
 
+Exit `1` is not in that table because no error maps to it. It is reserved for
+the opposite case: a command that completed successfully and whose answer is
+"no". Only `diff` returns it, when the two sides differ.
+
+The distinction is worth the reserved code. A difference is not a failure —
+the command did exactly what was asked — and collapsing the two would mean a
+script branching on "they differ" could not tell that case from a registry
+timeout. `diff`, `grep`, and `git diff --exit-code` all made the same choice.
+`TestExitCodeNeverReturnsOne` keeps `1` unreachable from any error code, so
+the two can never blur.
+
 `limit-exceeded` maps to `4` because a limit is a property of the artifact
 being constructed or consumed. `timeout` maps to `6` because every bounded
 operation that can time out is a network or registry operation. Programmatic

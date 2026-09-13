@@ -59,7 +59,7 @@ spec:
       - https://slsa.dev/provenance/v1
     requireLockDigest: true
     sources:
-      allowedSchemes: [https]
+      allowedTypes: [git]
       allowedHosts:
         - github.com
       requireImmutableResolution: true
@@ -72,8 +72,11 @@ spec:
     maxExpandedBytes: 1073741824
 ```
 
-This example is illustrative until the JSON Schema and predicate contract are
-frozen.
+The complete grammar is the
+[verification-policy schema](../schemas/verification-policy.v1alpha1.schema.json),
+which is normative: the loader is one implementation of it, and a test asserts
+the two agree on required fields, unknown-field rejection, and every limit's
+ceiling. The example above is exercised by the test suite, so it parses.
 
 ## Policy document rules
 
@@ -128,7 +131,7 @@ Provenance policy may require:
 - an authenticated builder identity;
 - a matching manifest digest and lock digest;
 - an accepted DevProof and resolver version range;
-- allowed source types, schemes, hosts, or repository prefixes;
+- allowed source types or hosts;
 - immutable source resolutions;
 - matching per-source tree digests;
 - absence of unapproved source types; and

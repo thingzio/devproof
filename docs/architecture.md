@@ -152,8 +152,13 @@ explicit build option.
 ### Direct single-source build
 
 A direct path or Git build creates an in-memory one-source manifest and lock,
-then follows the same pipeline. It may optionally write the generated manifest
-and lock. Direct mode is convenience syntax, not a second implementation.
+then follows the same pipeline. Direct mode is convenience syntax, not a
+second implementation.
+
+The synthesized manifest is not written to disk. A manifest is a document
+someone maintains and reviews, and one that appeared as a side effect of a
+build would be neither. `devproof init` writes one on purpose, with the
+comments that make it editable.
 
 ## Fetch and expansion flow
 

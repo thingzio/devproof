@@ -7,16 +7,16 @@ for automation when `--format json` or `--quiet` is selected.
 
 ```text
 devproof
+  init       write a starter bundle manifest
   lock       resolve a manifest and write its immutable lock
   build      build and optionally publish a bundle
   verify     verify integrity, evidence, and policy
   expand     verify and materialize a bundle
+  diff       compare two canonical trees
+  copy       copy a subject and its evidence between locations
   inspect    show subject, inventory, and evidence metadata
   version    show version and supported format versions
 ```
-
-`diff` is a planned post-v1 command and is not part of the first implementation
-contract.
 
 Running `devproof` without arguments prints root help and exits successfully.
 Every command supports `--help` without reading configuration, touching disk
@@ -92,6 +92,35 @@ path not existing is not.
   `NO_COLOR`, `TERM=dumb`, `--no-color`, JSON, or quiet mode.
 
 Logging never corrupts a digest, path, or JSON result intended for a pipeline.
+
+## `devproof init`
+
+```text
+devproof init [--src DIR] [--to devproof.yaml]
+```
+
+Writes a commented manifest describing one local source, so that a first
+manifest does not require reading the schema first. The comments cover the
+`git` source type, `include` and `exclude`, `mountPath`, `subPath`, and `ref` —
+the things someone would otherwise go looking for.
+
+Behavior:
+
+- `--src` defaults to the working directory and sets only the source's `path`.
+  The rest of the document never varies.
+- The recorded path is rewritten relative to the manifest's directory, because
+  a manifest resolves its sources against itself.
+- A `--src` that does not exist yet warns on stderr and still writes the
+  manifest, since creating the manifest first is an ordinary order of work.
+- It never overwrites. An existing file at `--to` is a `destination-exists`
+  error, exit 4.
+
+The file it writes is validated against the published
+[bundle schema](../schemas/bundle.v1alpha1.schema.json) by the test suite, so
+the scaffold cannot drift out of conformance with the document it teaches.
+
+Text output reports the manifest path, the recorded source, and the next
+command. Quiet output is the manifest path.
 
 ## `devproof lock`
 
@@ -207,6 +236,53 @@ Rules:
 Text output reports the destination, subject digest, tree digest, file count,
 and verification summary. Quiet output is the absolute destination path.
 
+## `devproof diff`
+
+```text
+devproof diff [--quiet-if-same] FROM TO
+```
+
+Compares two canonical trees. Each operand is either an OCI reference —
+anything carrying a `://` scheme — or a path to a local directory. A directory
+is canonicalized through the same path a build uses, so "no differences" means
+a build of that directory would produce the subject it was compared against.
+
+```console
+$ devproof diff oci://registry.example.com/team/config:v1 ./content
+from:            sha256:168de0126f4a8c...
+to:              sha256:08f7a027d5c509...
+added:           1
+removed:         0
+modified:        1
+
+~ app/config/service.yaml
++ app/config/new.yaml
+```
+
+Markers are `+` added, `-` removed, `~` content changed, and `m` mode changed.
+A mode change is separate from a modification on purpose: reporting an
+executable bit flip as a modification would claim the bytes changed when they
+did not. Every entry carries both digests, so the classification can be
+checked rather than trusted.
+
+Changes are sorted by canonical path.
+
+**Exit codes are the contract here.** `0` means the two sides are identical;
+`1` means they differ. A difference is an answer rather than a failure, so it
+carries no error and writes nothing to stderr. Everything above `1` is a real
+failure, as everywhere else.
+
+```bash
+if devproof diff "$REFERENCE" ./content --quiet-if-same; then
+  echo "nothing to publish"
+fi
+```
+
+An operand that cannot be read fails normally. A mistyped directory reports
+that it could not be read rather than being reinterpreted as a registry
+reference, because the scheme decides how an operand is parsed, not whether
+the path happens to exist.
+
 ## `devproof inspect`
 
 ```text
@@ -263,6 +339,7 @@ that was not caused by SIGINT uses the operational failure code and reports
 
 ```text
 0    requested operation completed successfully
+1    devproof diff only: the comparison succeeded and the sides differ
 2    command usage, manifest, lock, or unsupported-version error
 3    source resolution, stale lock, unsafe path, or composition error
 4    artifact construction, integrity, digest, or expansion error
@@ -274,6 +351,10 @@ that was not caused by SIGINT uses the operational failure code and reports
 
 The JSON error object also contains the finer SDK error code. Exit codes remain
 coarse enough for stable shell behavior.
+
+No failure exits `1`. It is reserved for a command that completed and whose
+answer is "no", so a script branching on "they differ" cannot mistake a
+registry timeout for a difference (DP-023).
 
 ## JSON result envelope
 

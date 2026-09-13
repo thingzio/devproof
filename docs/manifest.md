@@ -10,6 +10,12 @@ DevProof uses two input documents:
 The manifest is authored by users and may be YAML or JSON. The lock is generated
 canonical JSON and must not be manually edited.
 
+The manifest's complete grammar is the
+[bundle schema](../schemas/bundle.v1alpha1.schema.json), which is normative:
+the loader is one implementation of it. `devproof init` writes a commented
+manifest that already conforms, which is usually a faster start than reading
+either.
+
 ## Manifest example
 
 ```yaml
@@ -177,8 +183,9 @@ ambiguous. Source list order is never precedence.
 
 ## Lock example
 
-The exact schema will be published with machine-readable JSON Schema before the
-first implementation release. The structural contract is:
+The complete grammar is the
+[bundle-lock schema](../schemas/bundle-lock.v1alpha1.schema.json). The
+structural contract is:
 
 ```json
 {
