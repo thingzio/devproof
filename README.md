@@ -193,6 +193,9 @@ spec:
       mountPath: app
       config:
         url: https://github.com/example/application.git
+        # A branch, a tag, or a full commit SHA. A branch is fine here
+        # precisely because the lock pins whatever it resolved to, and a
+        # locked build fails rather than quietly following it somewhere new.
         ref: main
         subPath: deploy
     - name: environment

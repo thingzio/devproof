@@ -19,9 +19,11 @@ package schema_test
 import (
 	"bytes"
 	"encoding/json"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -494,4 +496,123 @@ func TestGoldenConfigValidates(t *testing.T) {
 	if _, err := bundle.ParseConfig(data); err != nil {
 		t.Errorf("the decoder rejects the normative golden config: %v", err)
 	}
+}
+
+// TestDocumentedExamplesAreValid parses every YAML example in the repository's
+// Markdown and checks it against both the decoder and the published schema.
+//
+// docs/cli.md says examples in the documentation run as tests. The CLI's did;
+// the documents' did not, and one of them had been wrong for a while: the
+// policy example used sources.allowedSchemes, a field SourceRules has never
+// had, so the canonical example of a verification policy would have been
+// rejected as an unknown field by the strictness it was demonstrating.
+//
+// Only blocks declaring both apiVersion and kind are checked. A fragment
+// showing two fields in context is a legitimate thing to write, and demanding
+// that every snippet be a whole document would make the documentation worse.
+func TestDocumentedExamplesAreValid(t *testing.T) {
+	t.Parallel()
+
+	byKind := map[string]struct {
+		schema string
+		decode func([]byte) error
+	}{
+		bundle.KindBundle:             {schema.Bundle, parseSpec},
+		bundle.KindBundleLock:         {schema.BundleLock, parseLock},
+		bundle.KindVerificationPolicy: {schema.VerificationPolicy, parsePolicy},
+	}
+
+	yamlBlock := regexp.MustCompile("(?s)```yaml\n(.*?)```")
+	declares := regexp.MustCompile(`(?m)^kind:\s*(\S+)`)
+
+	var checked int
+	for _, file := range markdownFiles(t) {
+		data, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatalf("reading %s: %v", file, err)
+		}
+		for i, block := range yamlBlock.FindAllStringSubmatch(string(data), -1) {
+			body := block[1]
+			if !strings.Contains(body, "apiVersion:") {
+				continue
+			}
+			kind := declares.FindStringSubmatch(body)
+			if kind == nil {
+				continue
+			}
+			target, known := byKind[kind[1]]
+			if !known {
+				t.Errorf("%s block %d declares unknown kind %q", file, i+1, kind[1])
+				continue
+			}
+
+			checked++
+			name := filepath.Base(file) + "/" + kind[1]
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				if err := target.decode([]byte(body)); err != nil {
+					t.Errorf("%s block %d does not parse: %v", file, i+1, err)
+					return
+				}
+				// Through the typed model, the same path a document takes on
+				// the way to its digest.
+				normalized, err := normalizeForSchema(kind[1], []byte(body))
+				if err != nil {
+					t.Fatalf("re-encoding: %v", err)
+				}
+				if err := compile(t, target.schema).Validate(asJSONValue(t, normalized)); err != nil {
+					t.Errorf("%s block %d does not satisfy the schema:\n%v", file, i+1, err)
+				}
+			})
+		}
+	}
+
+	if checked == 0 {
+		t.Fatal("no documented examples were checked; the extractor is wrong")
+	}
+	t.Logf("checked %d documented examples", checked)
+}
+
+// normalizeForSchema re-encodes a document through its typed model.
+func normalizeForSchema(kind string, data []byte) ([]byte, error) {
+	switch kind {
+	case bundle.KindBundle:
+		spec, err := bundle.ParseSpec(data)
+		if err != nil {
+			return nil, err
+		}
+		return json.Marshal(spec)
+	case bundle.KindVerificationPolicy:
+		doc, err := policy.ParseDocument(data)
+		if err != nil {
+			return nil, err
+		}
+		return json.Marshal(doc)
+	default:
+		return data, nil
+	}
+}
+
+// markdownFiles lists the Markdown a reader is expected to copy from.
+func markdownFiles(t *testing.T) []string {
+	t.Helper()
+
+	var out []string
+	root := repo.Root()
+	for _, dir := range []string{".", "docs", "schemas", "examples"} {
+		err := filepath.WalkDir(filepath.Join(root, dir), func(path string, d fs.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if !d.IsDir() && strings.HasSuffix(path, ".md") {
+				out = append(out, path)
+			}
+			return nil
+		})
+		if err != nil {
+			t.Fatalf("walking %s: %v", dir, err)
+		}
+	}
+	return out
 }
