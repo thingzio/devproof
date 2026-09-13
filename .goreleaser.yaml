@@ -114,12 +114,30 @@ homebrew_casks:
     # The binaries are signed but not Apple-notarized, so Gatekeeper would
     # otherwise refuse to run them. Stripping the quarantine flag on install is
     # what makes a downloaded CLI usable without a right-click dance.
-    hooks:
-      post:
-        install: |
-          if OS.mac?
-            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/devproof"]
-          end
+    #
+    # Written through custom_block rather than hooks.post.install, because
+    # Homebrew deprecated the raw `postflight` Ruby block that goreleaser emits
+    # for that field and warns on every load of the cask -- four times during
+    # one `brew install`. postflight_steps is a declarative DSL rather than a
+    # rename, so the body could not simply be moved across.
+    #
+    # goreleaser gained hooks.post.install_steps for exactly this, but that
+    # change is still an open pull request and no released version accepts the
+    # field. Revisit when one does; this block is then deletable.
+    #
+    # The inner braces are escaped because goreleaser runs Go templating over
+    # the whole rendered cask, and {{staged_path}} is Homebrew's own token,
+    # resolved at install time rather than at release time.
+    #
+    # Removing the quarantine flag is a workaround for not notarizing. The
+    # right fix is an Apple Developer ID and a notarized build; until then this
+    # is a deliberate, visible trade rather than something to normalize away.
+    custom_block: |
+      postflight_steps do
+        on_macos do
+          run "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "{{ "{{staged_path}}" }}/devproof"]
+        end
+      end
 
 snapshot:
   version_template: '{{ incpatch .Version }}-next'
