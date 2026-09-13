@@ -86,8 +86,9 @@ After the first stable release the module follows semantic versioning.
 
 ### Covered
 
-Everything exported from the module root and from `bundle`, `policy`,
-`evidence`, `artifact`, `source`, and `conformance`.
+Everything exported from `pkg/devproof` and from `pkg/bundle`, `pkg/policy`,
+`pkg/evidence`, `pkg/artifact`, `pkg/source`, `pkg/credentials`, and
+`pkg/conformance`.
 
 ### Not covered
 
@@ -111,6 +112,27 @@ by:
 
 A request struct gaining a field is not a breaking change. This is why
 operations take request structs rather than long parameter lists.
+
+### How a break is noticed
+
+A module outside DevProof lives at
+`internal/repo/testdata/external-resolver`. It implements the source resolver
+contract and calls every client operation, setting the request fields and
+reading the result fields an embedding application would. It sees only the
+public surface — the compiler forbids it from naming anything under
+`internal/` — and a test builds it.
+
+Compiling is the whole assertion. A renamed method, a removed field, or a
+result field that changed type fails there.
+
+It is not a compatibility gate, and deliberately so. Before 1.0 a minor
+version may break the API on purpose; the user of this fixture is the person
+making the break, who has to update it in the same commit. A gate that fires on
+every intentional change is one everybody learns to bypass.
+
+A mechanical check — `apidiff` or `gorelease` against the previous release — is
+a 1.0 exit criterion. Adding it before then would report a hundred intended
+breaks and no unintended ones.
 
 ### Deprecation
 

@@ -87,6 +87,13 @@ func TestCodeownersPathsExist(t *testing.T) {
 //
 // The fixture lives under testdata, which the go tool ignores, so it has its
 // own module and does not affect this one's dependencies.
+//
+// The same module is also the external-consumer fixture: it names every
+// operation an embedding application reaches for and every request and result
+// field it would set. Compiling is the whole assertion. It is not an
+// API-compatibility gate -- before 1.0 a minor version may break it on purpose
+// -- but the break then happens in a commit that has to update it, rather than
+// being discovered by somebody else.
 func TestExternalModuleCanImplementTheResolverContract(t *testing.T) {
 	if testing.Short() {
 		t.Skip("compiles a separate module")
@@ -100,7 +107,7 @@ func TestExternalModuleCanImplementTheResolverContract(t *testing.T) {
 	cmd := exec.Command("go", "build", "./...")
 	cmd.Dir = dir
 	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("a module outside devproof cannot implement source.Resolver:\n%s", out)
+		t.Fatalf("a module outside devproof cannot build against the public surface:\n%s", out)
 	}
 }
 

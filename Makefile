@@ -68,6 +68,11 @@ help: ## Print this help
 tidy: ## Tidy and verify go.mod/go.sum
 	go mod tidy
 	go mod verify
+	# The external-consumer fixture is its own module and imports this one, so
+	# its go.sum tracks this module's dependency graph. Tidying it here keeps a
+	# dependency bump from leaving a fixture that cannot build for a reason
+	# unrelated to the API it exists to check.
+	cd internal/repo/testdata/external-resolver && go mod tidy
 	$(MAKE) notices
 
 .PHONY: notices
@@ -284,6 +289,9 @@ tidy-check: ## Fail if go.mod or go.sum is not tidy
 	go mod verify
 	@diff="$$(go mod tidy -diff)" || { printf '%s\n' "$$diff"; \
 	  echo "go.mod/go.sum are not tidy; run make tidy"; exit 1; }
+	@cd internal/repo/testdata/external-resolver && \
+	  diff="$$(go mod tidy -diff)" || { printf '%s\n' "$$diff"; \
+	  echo "the external-consumer fixture is not tidy; run make tidy"; exit 1; }
 
 .PHONY: notices-check
 notices-check: ## Fail if THIRD_PARTY_NOTICES.md is out of date
