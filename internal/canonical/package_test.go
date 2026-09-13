@@ -265,7 +265,11 @@ func TestVerifySubjectRejectsTampering(t *testing.T) {
 		t.Parallel()
 		tampered := bytes.Replace(subject.ConfigBytes, []byte(`"fileCount":7`), []byte(`"fileCount":6`), 1)
 		if bytes.Equal(tampered, subject.ConfigBytes) {
-			t.Skip("fixture shape changed; the substitution did not apply")
+			// Fatal, not skipped. A substitution that no longer matches leaves
+			// this subtest asserting nothing while still reporting success,
+			// which is the shape a tampering check takes on the day it stops
+			// working.
+			t.Fatalf("the fixture no longer contains the substituted text; this test asserts nothing")
 		}
 		_, err := VerifySubject(subject.ManifestBytes, tampered, int64(len(layer)), DigestOf(layer))
 		if !stderrors.Is(err, fault.CodeDigestMismatch) {
@@ -296,7 +300,7 @@ func TestVerifySubjectRejectsTampering(t *testing.T) {
 		tampered := bytes.Replace(subject.ManifestBytes,
 			[]byte(`{"artifactType"`), []byte(`{"annotations":{"a":"b"},"artifactType"`), 1)
 		if bytes.Equal(tampered, subject.ManifestBytes) {
-			t.Skip("fixture shape changed; the substitution did not apply")
+			t.Fatalf("the fixture no longer contains the substituted text; this test asserts nothing")
 		}
 		if _, err := VerifySubject(tampered, subject.ConfigBytes, int64(len(layer)), DigestOf(layer)); err == nil {
 			t.Error("a manifest carrying annotations was accepted")

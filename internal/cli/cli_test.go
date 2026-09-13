@@ -695,8 +695,12 @@ func TestElapsedTimeoutFails(t *testing.T) {
 	got := run(t, "--timeout", "1ns", "build", sourceTree(t),
 		"--to", "oci-layout://"+filepath.Join(t.TempDir(), "layout"))
 
+	// A nanosecond deadline has elapsed before the operation starts, so this
+	// is not a race. Succeeding would mean the operation never consulted its
+	// context, which is the unbounded run the timeout exists to prevent --
+	// skipping on success made that indistinguishable from a pass.
 	if got.code == fault.ExitSuccess {
-		t.Skip("the build completed within the timeout")
+		t.Fatalf("a build ran to completion under an already-elapsed deadline: %q", got.stdout)
 	}
 	if got.stdout != "" {
 		t.Errorf("a timed-out run wrote to stdout: %q", got.stdout)
@@ -709,6 +713,16 @@ func TestElapsedTimeoutFails(t *testing.T) {
 func TestNonInteractiveNeverPrompts(t *testing.T) {
 	t.Setenv("CI", "true")
 
+	// Every ambient identity source is removed rather than detected. A CI
+	// runner has one, so a test that skipped when signing succeeded would skip
+	// exactly where it matters and pass everywhere it does not.
+	for _, name := range []string{
+		"ACTIONS_ID_TOKEN_REQUEST_URL", "ACTIONS_ID_TOKEN_REQUEST_TOKEN",
+		"SIGSTORE_ID_TOKEN", "GITHUB_TOKEN", "GOOGLE_APPLICATION_CREDENTIALS",
+	} {
+		t.Setenv(name, "")
+	}
+
 	// Signing without a key would otherwise be the one path that could reach
 	// for a browser. With no ambient credential it must fail, not block.
 	got := run(t, "--timeout", "20s", "build", sourceTree(t),
@@ -716,7 +730,7 @@ func TestNonInteractiveNeverPrompts(t *testing.T) {
 		"--sign")
 
 	if got.code == fault.ExitSuccess {
-		t.Skip("an ambient signing credential was available")
+		t.Fatal("signing succeeded with every ambient identity source removed")
 	}
 	if got.stdout != "" {
 		t.Errorf("a failed signing run wrote to stdout: %q", got.stdout)

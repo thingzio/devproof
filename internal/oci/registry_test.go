@@ -575,7 +575,10 @@ func TestCredentialsAreNotForwardedAcrossAHostChangingRedirect(t *testing.T) {
 	_, _ = registry.Resolve(t.Context(), ref)
 
 	if !reached.Load() {
-		t.Skip("the redirect was not followed; nothing to assert")
+		// Fatal, not skipped. If the redirect is never followed this test
+		// asserts nothing and still reports success, which is how a
+		// credential-leak check quietly stops being one.
+		t.Fatal("the redirect was never followed; this test asserts nothing")
 	}
 	if sawAuthorization.Load() {
 		t.Error("a credential was forwarded across a host-changing redirect")

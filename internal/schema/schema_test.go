@@ -536,11 +536,14 @@ func TestInitTemplateValidatesAgainstTheSchema(t *testing.T) {
 func TestGoldenConfigValidates(t *testing.T) {
 	t.Parallel()
 
-	golden := filepath.Join(repo.Root(),
-		"internal", "canonical", "testdata", "format", "v1", "config.json")
+	golden := filepath.Join(repo.Root(), "vectors", "format", "v1", "config.json")
 	data, err := os.ReadFile(golden)
 	if err != nil {
-		t.Skipf("golden config fixture unavailable: %v", err)
+		// Fatal, not skipped. This test skipped silently for the whole time
+		// the vectors lived somewhere else, which is the failure mode it was
+		// written to prevent: the schema and the normative bytes drifting with
+		// nothing red.
+		t.Fatalf("reading the normative config vector: %v", err)
 	}
 
 	if err := compile(t, schema.BundleConfig).Validate(asJSONValue(t, data)); err != nil {

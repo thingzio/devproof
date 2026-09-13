@@ -23,9 +23,12 @@
 // change fail a test instead of silently reissuing every subject digest under
 // a new identity.
 //
-// Fixtures live under testdata/format/<version>/. Regenerating them is
-// correct only when introducing a new format version, never when an existing
-// one "looks wrong".
+// Fixtures live under vectors/format/<version>/ at the repository root rather
+// than under a testdata directory, because they are published: an
+// implementation in another language compares its output against them, and a
+// testdata path is a Go convention that says "ignore this". Regenerating them
+// is correct only when introducing a new format version, never when an
+// existing one "looks wrong". See vectors/README.md.
 package golden
 
 import (
@@ -62,7 +65,7 @@ const (
 // difference.
 //
 // path is interpreted relative to the calling package's directory, so a test
-// in internal/canonical passes "testdata/format/v1/tree-records.bin".
+// in internal/canonical passes "../../vectors/format/v1/tree-records.bin".
 func Assert(t TB, path string, got []byte) {
 	t.Helper()
 
