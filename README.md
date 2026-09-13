@@ -75,6 +75,10 @@ reading a schema, and `devproof diff` answers "has anything changed since I
 built this?" — exit `0` when the two sides are identical, exit `1` when they
 differ.
 
+For a five-minute walkthrough that alters a stored artifact and watches
+verification catch it, see the [demo](examples/). It runs entirely on your
+machine, and it runs in CI, so what it claims stays true.
+
 Swap `oci-layout://` for `oci://registry.example.com/team/config` to work
 against a registry. Credentials come from your Docker configuration, so
 `docker login`, `gh auth login`, or `gcloud auth configure-docker` is the whole
@@ -256,6 +260,7 @@ report, err := conformance.VerifyLayout("./artifact", "v1")
 
 | | |
 | --- | --- |
+| [Demo](examples/) | a five-minute walkthrough, executed in CI |
 | [Architecture](docs/architecture.md) | components, data flow, failure behavior |
 | [Bundle format](docs/bundle-format.md) | canonical model, tree digest, OCI encoding |
 | [Manifest and lock](docs/manifest.md) | sources, resolution, filtering, composition |
