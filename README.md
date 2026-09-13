@@ -5,8 +5,8 @@
 [![Go Report Card](https://goreportcard.com/badge/github.com/thingzio/devproof)](https://goreportcard.com/report/github.com/thingzio/devproof)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 
-**Package files into OCI artifacts that are byte-identical everywhere, provably
-from where you say, and safe to unpack.**
+**Package files into OCI artifacts that have the same digest on every machine,
+carry signed proof of where they came from, and unpack safely.**
 
 Configuration, policies, scripts, and catalogs get assembled from several
 places that all move independently. Put them in a tarball and you have bytes
@@ -16,11 +16,6 @@ whether it changed, not who stands behind it.
 DevProof gives that pile a **name derived from its content** — a digest that is
 the same on every machine, forever — then lets you attach signed evidence to
 that name and check it against your own rules before anything touches disk.
-
-> **Status:** released and in use. The Go API is `v1alpha1` and, until 1.0,
-> a minor version may carry a breaking change. The bundle format is frozen
-> but not yet declared stable; see [compatibility](docs/compatibility.md) for
-> what each version number promises.
 
 ## Install
 

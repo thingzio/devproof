@@ -55,7 +55,10 @@ name — and you would get that same name on another machine, on another
 operating system, next year.
 
 That is the whole foundation. The digest is a function of the content and
-nothing else: not the time, not the path, not the machine, not who ran it.
+nothing else: not the time, not the path, not the machine, not who ran it. The
+`tree digest` on the line above names the payload independently of how it was
+encoded; how both are computed is the
+[bundle format](../../docs/bundle-format.md#content-and-tree-digests).
 Everything below depends on it, because a name that drifts cannot be used to
 agree about anything.
 
@@ -76,8 +79,9 @@ semantics:       not-evaluated
   [warning] policy-not-supplied: no verification policy was supplied, so trust was not evaluated; integrity alone does not establish that this artifact came from anyone in particular
 ```
 
-Most tools print one green check here. DevProof reports three separate things,
-and two of them say `not-evaluated` rather than `pass`:
+Most tools print one green check here. DevProof reports
+[three separate things](../../docs/policy.md#result-dimensions), and two of
+them say `not-evaluated` rather than `pass`:
 
 - **integrity** — are these the bytes the artifact claims? Checked always. It
   fetched the payload, hashed it, and compared every file against the
@@ -132,8 +136,12 @@ same artifact.
 
 ## 4. A failed policy writes nothing
 
-Policy is how you say what you will accept. This one requires signed
-provenance, and the bundle you built is unsigned:
+Policy is how you say what you will accept. A
+[`VerificationPolicy`](../../docs/policy.md) is a document you supply — never
+read from the artifact it judges, since an attacker who controls a bundle must
+not control the rules applied to it. This one requires signed
+[provenance](../../docs/bundle-format.md#provenance-and-signatures), and the
+bundle you built is unsigned:
 
 ```bash
 cat > policy.yaml <<'EOF'
@@ -163,7 +171,8 @@ then cleaned up — never written at all.
 That distinction is the point. Content that is written and then deleted has
 already been readable by anything watching the directory, so cleaning up
 afterwards is not the same guarantee as never having written it. The policy is
-evaluated before a single byte reaches disk.
+evaluated before a single byte reaches disk, and expansion itself is
+[staged and published atomically](../../docs/security.md#local-filesystem-handling).
 
 The non-zero exit is what makes this usable as a CI gate: a pipeline step
 built on it cannot pass by accident.
@@ -182,11 +191,21 @@ printf 'replicas: 999\n' > attacker-content/app.yaml
 printf 'timeout: 1s\n'   > attacker-content/limits.yaml
 devproof build ./attacker-content --to oci-layout://./attacker --tag v1 --quiet
 
+# A layout stores each blob in a file named after its own digest, so to
+# overwrite one you first have to know its name. `devproof inspect` reports
+# the payload layer's digest; python3 pulls that field out of the JSON and
+# strips the leading "sha256:", leaving just the file name.
+#
+# Nothing about this is privileged. Anyone who can write to the store can do
+# it, which is the point of the step.
 layer_of() {
   devproof inspect "$1" --format json |
     python3 -c 'import sys,json; print(json.load(sys.stdin)["result"]["subject"]["layerDigest"][7:])'
 }
 
+# Overwrite the good bundle's payload with the attacker's, under the good
+# bundle's file name. The store now serves bytes that are not the ones its
+# name promises.
 cp "attacker/blobs/sha256/$(layer_of oci-layout://./attacker:v1)" \
    "bundle/blobs/sha256/$(layer_of oci-layout://./bundle:v1)"
 ```
