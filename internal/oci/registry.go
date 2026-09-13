@@ -161,6 +161,23 @@ func (r *Registry) repository(ref artifact.Reference) (*remote.Repository, error
 	}
 	repo.Client = r.client
 	repo.PlainHTTP = r.plainHTTP
+
+	// The referrers API is used and nothing else, so that a registry without
+	// one reports an error this package handles rather than a result it
+	// silently produced another way.
+	//
+	// Left unset, oras-go probes for the API, falls back to the referrers tag
+	// schema on its own, and returns success. Both modes then looked identical
+	// here: every Referrers call reported StorageReferrers, including against a
+	// registry whose referrers endpoint returns 404. That made
+	// evidence.allowTagFallback -- the rule whose whole purpose is refusing the
+	// fallback's replace-rather-than-accumulate semantics -- fire nowhere it
+	// mattered, and made the fallback branch below unreachable (DP-028).
+	if err := repo.SetReferrersCapability(true); err != nil {
+		return nil, fault.Wrap(fault.CodeInternal, registryOp,
+			"fixing the referrers capability", err)
+	}
+
 	r.repos[key] = repo
 	return repo, nil
 }

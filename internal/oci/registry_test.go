@@ -584,3 +584,37 @@ func TestCredentialsAreNotForwardedAcrossAHostChangingRedirect(t *testing.T) {
 		t.Error("a credential was forwarded across a host-changing redirect")
 	}
 }
+
+// TestStorageModeReportsTheModeThatAnswered closes a gap that made a policy
+// rule fire nowhere it mattered.
+//
+// oras-go probes for the referrers API, falls back to the referrers tag schema
+// on its own, and returns success either way. Both modes therefore looked
+// identical here: every listing reported "referrers", including against a
+// registry whose referrers endpoint returns 404 -- which is what this handler
+// does, and what every registry older than distribution-spec 1.1 does.
+//
+// The fallback tag holds one manifest. It cannot express a set, and attaching
+// a second piece of evidence replaces the first rather than adding to it. That
+// is why the mode is reported at all, and why evidence.allowTagFallback
+// exists; a report that always said "referrers" made the rule unreachable
+// (DP-028).
+func TestStorageModeReportsTheModeThatAnswered(t *testing.T) {
+	t.Parallel()
+
+	fake := newFakeRegistry(t)
+	registry := NewRegistry(RegistryOptions{PlainHTTP: true})
+	defer func() { _ = registry.Close() }()
+
+	ref := fake.reference(t, "v1")
+	subject := artifact.DescriptorFor(artifact.MediaTypeImageManifest, []byte(`{"schemaVersion":2}`))
+
+	_, storage, err := registry.Referrers(t.Context(), ref, subject, "")
+	if err != nil {
+		t.Fatalf("listing referrers: %v", err)
+	}
+	if storage != artifact.StorageTagFallback {
+		t.Errorf("storage = %q against a registry with no referrers API, want %q",
+			storage, artifact.StorageTagFallback)
+	}
+}

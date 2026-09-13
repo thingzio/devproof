@@ -298,6 +298,31 @@ of this check that helps runs before the push.
 `make tidy` calls it, so a dependency cannot enter the binary without its
 license being recorded.
 
+## Live registry tests
+
+The registry tests in `internal/oci` drive an in-process handler written in
+this repository. That proves the client does what we believe the distribution
+specification says, which is a different claim from "it works against a
+registry somebody else wrote" — and the difference is where interoperability
+bugs live.
+
+A build-tagged suite runs the same round trip against a real server:
+
+```sh
+docker run --rm -p 5000:5000 ghcr.io/project-zot/zot-linux-amd64:latest
+DEVPROOF_TEST_REGISTRY=localhost:5000 go test -tags registry ./internal/oci/
+```
+
+CI runs it against two, chosen for a feature one has and the other does not:
+zot implements the referrers API, and distribution 2.8.3 predates it so the
+fallback tag answers instead. That pair found a real defect — the evidence
+storage mode was reported as `referrers` against a registry whose referrers
+endpoint returns 404, because the client library falls back on its own and
+returns success, which made `evidence.allowTagFallback` unreachable.
+
+Asking for the tag without supplying a registry fails rather than skips:
+somebody who typed `-tags registry` meant to run it.
+
 ## Release gates
 
 A release candidate must pass `make qualify-check`, which is the same gate a

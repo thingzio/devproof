@@ -242,6 +242,53 @@ jobs:
             **/testdata/fuzz/**
           if-no-files-found: ignore
 
+  # Two registries, because the interesting difference between them is a
+  # feature one has and the other does not.
+  #
+  # Every other registry test drives an in-process handler written in this
+  # repository, which proves the client does what we believe the distribution
+  # specification says. That is a different claim from "it works against a
+  # registry somebody else wrote", and the difference is where interoperability
+  # bugs live -- this job found one: the evidence storage mode was reported as
+  # "referrers" against a registry whose referrers endpoint returns 404,
+  # because oras-go falls back on its own and returns success.
+  #
+  #   zot                  implements the referrers API
+  #   distribution 2.8.3   predates it, so the fallback tag answers
+  registry:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {name: zot, image: "ghcr.io/project-zot/zot-linux-amd64:v2.1.10"}
+          - {name: distribution, image: "registry:2.8.3"}
+    services:
+      registry:
+        image: ${{ matrix.image }}
+        ports: ['5000:5000']
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        with:
+          go-version-file: .go-version
+          check-latest: true
+      - name: wait for the registry
+        run: |
+          for _ in $(seq 1 60); do
+            if curl -sf http://localhost:5000/v2/ >/dev/null; then exit 0; fi
+            sleep 1
+          done
+          echo "::error::${{ matrix.name }} did not become ready"
+          exit 1
+      - name: live registry round trip
+        run: go test -tags registry -count=1 ./internal/oci/...
+        env:
+          DEVPROOF_TEST_REGISTRY: localhost:5000
+
   build:
     runs-on: ubuntu-latest
     steps:
