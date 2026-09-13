@@ -97,7 +97,9 @@ func newFixtureRepo(t *testing.T, files map[string]string, executables ...string
 // resolver returns a resolver wired to the fixture.
 func (f *fixtureRepo) resolver() *Resolver {
 	return &Resolver{
-		open: func(context.Context, Config) (*gogit.Repository, error) { return f.repo, nil },
+		open: func(context.Context, Config, string) (*gogit.Repository, func(), error) {
+			return f.repo, func() {}, nil
+		},
 	}
 }
 
@@ -280,6 +282,14 @@ func TestValidateConfigRejects(t *testing.T) {
 			Config{URL: "https://user:token@example.invalid/repo.git", Ref: "main"},
 		},
 		{
+			"query string",
+			Config{URL: "https://example.invalid/repo.git?token=s3cret", Ref: "main"},
+		},
+		{
+			"fragment",
+			Config{URL: "https://example.invalid/repo.git#token=s3cret", Ref: "main"},
+		},
+		{
 			"escaping subPath",
 			Config{URL: "https://example.invalid/repo.git", Ref: "main", SubPath: "../../etc"},
 		},
@@ -356,8 +366,8 @@ func TestResolveRejectsSymlinks(t *testing.T) {
 		t.Fatalf("Commit: %v", err)
 	}
 
-	resolver := &Resolver{open: func(context.Context, Config) (*gogit.Repository, error) {
-		return repo, nil
+	resolver := &Resolver{open: func(context.Context, Config, string) (*gogit.Repository, func(), error) {
+		return repo, func() {}, nil
 	}}
 	_, err = resolve(t, resolver, source.ResolveRequest{
 		Name:   "application",

@@ -31,14 +31,17 @@ import (
 	"fmt"
 	"io"
 	"net/url"
+	"os"
 	"path"
 	"strings"
 
+	"github.com/go-git/go-billy/v5/osfs"
 	gogit "github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
+	"github.com/go-git/go-git/v5/plumbing/cache"
 	"github.com/go-git/go-git/v5/plumbing/filemode"
 	"github.com/go-git/go-git/v5/plumbing/object"
-	"github.com/go-git/go-git/v5/storage/memory"
+	"github.com/go-git/go-git/v5/storage/filesystem"
 
 	"github.com/thingzio/devproof/internal/canonical"
 	"github.com/thingzio/devproof/internal/safefs"
@@ -69,7 +72,9 @@ type Resolver struct {
 	// open obtains a repository. It is a field so that tests can supply a
 	// local fixture without the resolver ever relaxing its HTTPS rule for
 	// production callers.
-	open func(ctx context.Context, cfg Config) (*gogit.Repository, error)
+	// It returns a cleanup that releases whatever storage backs the
+	// repository; the caller runs it once the snapshot has been taken.
+	open func(ctx context.Context, cfg Config, tempRoot string) (*gogit.Repository, func(), error)
 }
 
 var _ source.Resolver = (*Resolver)(nil)
@@ -108,10 +113,14 @@ func (r *Resolver) Resolve(ctx context.Context, req source.ResolveRequest) (_ so
 		effective.Ref = commit
 	}
 
-	repo, err := r.open(ctx, effective)
+	repo, release, err := r.open(ctx, effective, req.TempRoot)
 	if err != nil {
 		return nil, err
 	}
+	// Released as soon as the snapshot exists: SnapshotTree copies every
+	// selected blob into storage this resolver owns, so nothing afterwards
+	// reads the clone.
+	defer release()
 
 	commit, commitErr := resolveCommit(repo, effective.Ref)
 	if commitErr != nil {
@@ -225,6 +234,25 @@ func validateConfig(config Config) *fault.Error {
 		return fault.New(fault.CodeInvalidInput, op,
 			"git source url carries embedded credentials; supply them through a credential provider")
 	}
+	// Same reason, one layer along. A query or fragment is not needed to clone
+	// any repository this resolver supports, and both are ordinary places to
+	// smuggle a token -- which would then be copied verbatim into the lock and
+	// into signed provenance, where it is published rather than merely
+	// logged. The redaction that protects diagnostics does not reach either.
+	//
+	// Rejected rather than stripped: silently altering the URL would mean the
+	// lock recorded something the author did not write, and a credential that
+	// was quietly removed is one nobody learns to stop putting there.
+	if parsed.RawQuery != "" || parsed.ForceQuery {
+		return fault.New(fault.CodeInvalidInput, op,
+			"git source url carries a query string; it would be recorded in the lock "+
+				"and in provenance, so supply credentials through a credential provider instead")
+	}
+	if parsed.Fragment != "" {
+		return fault.New(fault.CodeInvalidInput, op,
+			"git source url carries a fragment; it would be recorded in the lock "+
+				"and in provenance, and a ref belongs in the ref field")
+	}
 	if config.Ref == "" {
 		return fault.New(fault.CodeInvalidInput, op,
 			"git source has no ref; a branch, tag, or commit is required")
@@ -239,9 +267,34 @@ func validateConfig(config Config) *fault.Error {
 	return nil
 }
 
-// cloneOverHTTPS fetches a repository into memory.
-func cloneOverHTTPS(ctx context.Context, config Config) (*gogit.Repository, error) {
-	repo, err := gogit.CloneContext(ctx, memory.NewStorage(), nil, &gogit.CloneOptions{
+// cloneOverHTTPS fetches a repository into a private directory.
+//
+// Onto disk rather than into memory. A clone holds every object in every
+// branch and tag, and an in-memory storer made peak memory a function of
+// whatever the remote chose to serve -- so a large or hostile repository
+// exhausted the process before any bundle limit had anything to measure.
+// DP-033 makes independence from payload size a correctness property, and a
+// resolver is not exempt from it.
+//
+// The object cache stays bounded while the objects themselves live in the
+// temporary directory, which is removed by the returned cleanup whether the
+// resolve succeeded or failed.
+func cloneOverHTTPS(
+	ctx context.Context,
+	config Config,
+	tempRoot string,
+) (*gogit.Repository, func(), error) {
+
+	dir, err := os.MkdirTemp(tempRoot, "devproof-git-")
+	if err != nil {
+		return nil, func() {}, fault.Wrap(fault.CodeSourceResolution, op,
+			"creating a directory for the clone", err)
+	}
+	release := func() { _ = os.RemoveAll(dir) }
+
+	storer := filesystem.NewStorage(osfs.New(dir), cache.NewObjectLRUDefault())
+
+	repo, err := gogit.CloneContext(ctx, storer, nil, &gogit.CloneOptions{
 		URL: config.URL,
 		// The full history is fetched rather than a shallow clone because a
 		// lock may name a commit that is not the tip, and a shallow clone
@@ -256,13 +309,16 @@ func cloneOverHTTPS(ctx context.Context, config Config) (*gogit.Repository, erro
 		RecurseSubmodules: gogit.NoRecurseSubmodules,
 	})
 	if err != nil {
-		return nil, classifyCloneError(err, config.URL)
+		release()
+		return nil, func() {}, classifyCloneError(err, config.URL)
 	}
-	return repo, nil
+	return repo, release, nil
 }
 
 // classifyCloneError maps a transport failure onto a typed code without
-// echoing a URL that may carry a token in its query string.
+// echoing the URL. A query string can no longer reach here -- validateConfig
+// refuses one -- but redaction stays: a host and path are enough to act on,
+// and an error message is the least controlled thing this package emits.
 func classifyCloneError(err error, rawURL string) error {
 	safe := redactURL(rawURL)
 	switch {
