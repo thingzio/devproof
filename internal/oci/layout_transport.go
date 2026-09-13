@@ -25,6 +25,7 @@ import (
 	"io"
 	"sync"
 
+	"github.com/thingzio/devproof/internal/canonical"
 	"github.com/thingzio/devproof/pkg/artifact"
 	"github.com/thingzio/devproof/pkg/bundle"
 	"github.com/thingzio/devproof/pkg/fault"
@@ -193,9 +194,20 @@ func (t *LayoutTransport) Close() error {
 
 // Referrers lists evidence attached to a subject in a layout.
 //
-// A layout has no referrers API, so the index is scanned for manifests whose
-// subject is the one asked about. That is a real set, unlike the registry
-// fallback tag, so the storage mode reported is the referrers one.
+// A layout has no referrers API, so every manifest the index lists is read
+// and asked what it is a referrer for. The answer comes from the subject
+// descriptor inside the manifest, which is where the OCI image specification
+// puts the relationship and where every other implementation looks.
+//
+// The index also carries a "subject" member on each entry, which this package
+// writes and the layout specification does not define. It is a convenience
+// for anyone reading index.json, and it used to be the only thing consulted
+// -- so a generic copy or rewrite that produced a perfectly valid index
+// silently made attached evidence undiscoverable while leaving the manifests
+// that hold the real relationship untouched.
+//
+// This is a real set, unlike the registry fallback tag, so the storage mode
+// reported is the referrers one.
 func (t *LayoutTransport) Referrers(
 	_ context.Context,
 	ref artifact.Reference,
@@ -214,15 +226,58 @@ func (t *LayoutTransport) Referrers(
 
 	var found []artifact.Descriptor
 	for _, item := range index.Manifests {
-		if item.Subject == "" || item.Subject != subject.Digest {
+		// The subject is in the index too and is not a referrer for itself.
+		if item.Digest == subject.Digest {
 			continue
 		}
-		if artifactType != "" && item.ArtifactType != artifactType {
+		referrer, ok := t.referrerRelationship(layout, item)
+		if !ok || referrer.subject != subject.Digest {
+			continue
+		}
+		if artifactType != "" && referrer.artifactType != artifactType {
 			continue
 		}
 		found = append(found, item.Descriptor())
 	}
 	return found, artifact.StorageReferrers, nil
+}
+
+// referrerRelationship reads what a manifest says it refers to.
+//
+// A manifest that cannot be read or parsed is skipped rather than failing the
+// listing. A layout directory is an open surface: anything may be sitting in
+// it, and one unreadable entry must not make a subject's real evidence
+// unverifiable (the same reasoning the policy applies to unrelated
+// referrers).
+func (t *LayoutTransport) referrerRelationship(
+	layout *Layout,
+	item IndexItem,
+) (struct{ subject, artifactType string }, bool) {
+
+	var out struct{ subject, artifactType string }
+
+	digest, err := canonical.ParseDigest(item.Digest)
+	if err != nil {
+		return out, false
+	}
+	raw, err := layout.GetBlob(digest, bundle.DefaultLimits().MaxManifestBytes)
+	if err != nil {
+		return out, false
+	}
+
+	var manifest struct {
+		ArtifactType string `json:"artifactType"`
+		Subject      *struct {
+			Digest string `json:"digest"`
+		} `json:"subject"`
+	}
+	if err := json.Unmarshal(raw, &manifest); err != nil || manifest.Subject == nil {
+		return out, false
+	}
+
+	out.subject = manifest.Subject.Digest
+	out.artifactType = manifest.ArtifactType
+	return out, true
 }
 
 // Attach stores an evidence blob and the referrer manifest naming it.

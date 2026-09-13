@@ -20,6 +20,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"encoding/json"
 	stderrors "errors"
 	"os"
 	"path/filepath"
@@ -561,4 +562,69 @@ spec:
 
 func writeFile(path, body string) error {
 	return os.WriteFile(path, []byte(body), 0o644)
+}
+
+// TestEvidenceSurvivesAGenericIndexRewrite covers a layout that has been
+// through a tool that is not this one.
+//
+// A layout has no referrers API, so this one records the relationship in a
+// "subject" member on each index entry. That member is not part of the OCI
+// image-layout specification. The standard place for the relationship is the
+// subject descriptor inside the referrer manifest, which is where every other
+// implementation looks -- so a generic copy or rewrite that produced a
+// perfectly valid index would silently drop the only thing making attached
+// evidence findable.
+func TestEvidenceSurvivesAGenericIndexRewrite(t *testing.T) {
+	t.Parallel()
+
+	client, key := signingClient(t)
+	layout := filepath.Join(t.TempDir(), "layout")
+	built := buildSigned(t, client, layout)
+
+	// Rewrite index.json without the non-standard member, keeping everything
+	// the specification does define.
+	indexPath := filepath.Join(layout, "index.json")
+	raw, err := os.ReadFile(indexPath)
+	if err != nil {
+		t.Fatalf("reading index: %v", err)
+	}
+	var index map[string]any
+	if err := json.Unmarshal(raw, &index); err != nil {
+		t.Fatalf("decoding index: %v", err)
+	}
+	manifests, _ := index["manifests"].([]any)
+	var stripped int
+	for _, entry := range manifests {
+		item, _ := entry.(map[string]any)
+		if _, had := item["subject"]; had {
+			delete(item, "subject")
+			stripped++
+		}
+	}
+	if stripped == 0 {
+		t.Fatal("no index entry carried the custom subject member; the fixture proves nothing")
+	}
+	rewritten, err := json.Marshal(index)
+	if err != nil {
+		t.Fatalf("encoding index: %v", err)
+	}
+	if err := os.WriteFile(indexPath, rewritten, 0o644); err != nil {
+		t.Fatalf("writing index: %v", err)
+	}
+
+	doc := policyDoc("signed", func(d *policy.Document) {
+		d.Spec.Signatures.Threshold = 1
+		d.Spec.Signatures.Identities = []policy.IdentityRule{{KeyID: keyIDOf(t, key)}}
+	})
+	report, err := client.Verify(t.Context(), devproof.VerifyRequest{
+		Reference: built.Reference,
+		Policy:    doc,
+	})
+	if err != nil {
+		t.Fatalf("verifying after a generic index rewrite: %v", err)
+	}
+	if report.Trust != policy.StatusPass {
+		t.Errorf("evidence became undiscoverable after a standards-valid index rewrite: %v",
+			report.Findings)
+	}
 }
