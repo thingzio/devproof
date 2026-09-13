@@ -255,6 +255,34 @@ cover-check: cover ## Fail if coverage falls below the threshold
 .PHONY: qualify
 qualify: tidy license-check fmt lint lint-actions vet test-golden cover-check vuln secrets ## Run the full pre-commit gate
 
+# The same gate with the repair steps replaced by their check-only forms.
+#
+# `qualify` tidies, regenerates notices, and formats, which is what you want
+# before a commit and exactly what you do not want on a tagged commit: the gate
+# would pass against bytes that are not the bytes being released. This target
+# changes nothing, so a green run is a statement about the committed tree.
+.PHONY: qualify-check
+qualify-check: tidy-check notices-check license-check fmt-check lint lint-actions vet test-golden cover-check vuln secrets ## Run the gate without modifying anything
+
+.PHONY: tidy-check
+tidy-check: ## Fail if go.mod or go.sum is not tidy
+	go mod verify
+	@diff="$$(go mod tidy -diff)" || { printf '%s\n' "$$diff"; \
+	  echo "go.mod/go.sum are not tidy; run make tidy"; exit 1; }
+
+.PHONY: notices-check
+notices-check: ## Fail if THIRD_PARTY_NOTICES.md is out of date
+	@python3 tools/gen-third-party-notices >/dev/null
+	@git diff --quiet -- THIRD_PARTY_NOTICES.md || { \
+	  git checkout -- THIRD_PARTY_NOTICES.md; \
+	  echo "THIRD_PARTY_NOTICES.md is out of date; run make notices"; exit 1; }
+
+.PHONY: fmt-check
+fmt-check: $(GOLANGCI_LINT_STAMP) ## Fail if any file is not formatted
+	@diff="$$(golangci-lint fmt --diff --config .golangci.yaml)"; \
+	  if [ -n "$$diff" ]; then printf '%s\n' "$$diff"; \
+	  echo "formatting is not applied; run make fmt"; exit 1; fi
+
 ##@ Release
 
 .PHONY: info

@@ -11,11 +11,60 @@ permissions:
   contents: read
 
 jobs:
+  # What a v* tag is allowed to mean.
+  #
+  # The workflow triggers on any tag matching v*, which is a wide door: a typo,
+  # a personal tag, or a branch someone tagged locally would all publish a
+  # release signed by this repository's identity. None of these checks is
+  # expensive and each one refuses a different mistake.
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: the tag is a semantic version
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          if ! printf '%s' "$tag" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
+            echo "::error::tag $tag is not a semantic version"
+            exit 1
+          fi
+      - name: the tag is annotated and signed
+        # Presence, not trust. A runner has no keyring, so `git verify-tag`
+        # would fail for every tag including the good ones; what is checkable
+        # here is that the tag is an annotated object carrying a signature
+        # rather than a lightweight ref anybody could have pushed at any
+        # commit. Who signed it is established by the key on the commit, which
+        # is what a reviewer checks.
+        run: |
+          if [ "$(git cat-file -t "${GITHUB_REF_NAME}")" != "tag" ]; then
+            echo "::error::tag ${GITHUB_REF_NAME} is lightweight; releases are annotated and signed"
+            exit 1
+          fi
+          if ! git cat-file tag "${GITHUB_REF_NAME}" | grep -q -- "-----BEGIN .* SIGNATURE-----"; then
+            echo "::error::tag ${GITHUB_REF_NAME} carries no signature"
+            exit 1
+          fi
+      - name: the tag is on main
+        # A release built from a branch that was never reviewed is a release
+        # whose contents nobody agreed to. Ancestry rather than equality: main
+        # moves on after a tag.
+        run: |
+          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+          if ! git merge-base --is-ancestor "${GITHUB_REF_NAME}^{commit}" origin/main; then
+            echo "::error::tag ${GITHUB_REF_NAME} is not an ancestor of main"
+            exit 1
+          fi
+
   # The same cells CI gates on. A release does not need one runner per shipped
   # target: goreleaser cross-compiles all four from a single machine, so an
   # architecture-specific runner buys running the tests there, nothing else.
   verify:
     name: verify (${{ matrix.platform }})
+    needs: [gate]
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: true
@@ -34,13 +83,29 @@ jobs:
         with:
           go-version-file: .go-version
           check-latest: true
-      - name: test
-        run: make cover-check
+      # The whole gate, not a subset. A release used to run the tests and the
+      # conformance reader and skip lint, formatting, the tidy check, the
+      # vulnerability and secret scans, and the coverage floor -- so the tag
+      # most people install from was held to a lower standard than a pull
+      # request.
+      #
+      # qualify-check rather than qualify: the mutating gate would repair the
+      # tree and then pass, which on a tagged commit means passing against
+      # bytes nobody is releasing.
+      - name: qualify
+        run: make qualify-check
       - name: conformance
         # The independent reader, run against the tagged tree. It shares no
         # code with the writer, so this is the check that the artifact matches
         # the specification rather than matching the code that produced it.
         run: go test ./pkg/conformance/...
+      - name: fuzz smoke
+        # Short and deterministic. A release is not where a long campaign
+        # belongs, but a parser that crashes on its own seed corpus should not
+        # reach a tag.
+        run: make fuzz
+        env:
+          FUZZTIME: 20s
 
   # .versions.yaml stays authoritative for the tools that build a release.
   #

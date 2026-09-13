@@ -300,19 +300,35 @@ license being recorded.
 
 ## Release gates
 
-A release candidate must pass:
+A release candidate must pass `make qualify-check`, which is the same gate a
+pull request runs with its repair steps replaced by their check-only forms:
 
 ```text
 format golden vectors
 unit and package tests
 race detector
-fuzz smoke corpus
 round-trip property suite
 registry and referrer integration suite
-SDK and CLI contract tests
+SDK, CLI, and documentation contract tests
 static analysis and formatting
-dependency, vulnerability, and license checks
+dependency, vulnerability, license, and secret checks
+coverage floor
 ```
+
+Plus, on the tagged commit only: the fuzz smoke corpus and the independent
+conformance reader.
+
+`qualify-check` rather than `qualify`. The gate a developer runs tidies,
+regenerates notices, and formats, which is what you want before a commit and
+exactly what you do not want on a tagged commit: it would pass against a
+working tree that is no longer the tree being released. The tagging helper runs
+the check-only form and then re-checks that the tree is still clean, because a
+gate that repairs is a gate that can dirty the tree it just approved.
+
+A `v*` tag also has to be a semantic version, be an annotated and signed tag
+object, and be an ancestor of `main`. The workflow triggers on any tag matching
+`v*`, and without those checks a typo or a locally tagged branch would publish
+a release signed by this repository's identity.
 
 Format v1 cannot be declared stable until at least two separately implemented
 read paths, or one implementation plus an independent conformance verifier,

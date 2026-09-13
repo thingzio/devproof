@@ -91,11 +91,23 @@ bump_version() {
 	# that someone remembered to is the difference between a checklist and a
 	# guarantee. Set SKIP_QUALIFY=1 only when re-tagging a commit already known
 	# to be green.
+	#
+	# qualify-check, not qualify: the mutating gate tidies, regenerates
+	# notices, and formats, so it can pass against a working tree that is no
+	# longer the committed tree, and the tag would then name bytes the gate
+	# never saw. The cleanliness check above runs before it; this one runs
+	# after, because a gate that repairs is a gate that can dirty the tree it
+	# just approved.
 	if [ "${SKIP_QUALIFY:-0}" = "1" ]; then
 		msg "SKIP_QUALIFY=1 set; not running the qualification gate"
 	else
 		msg "Running the qualification gate before tagging"
-		make -C "${REPO_ROOT}" qualify || err "Qualification failed. Nothing was tagged."
+		make -C "${REPO_ROOT}" qualify-check || err "Qualification failed. Nothing was tagged."
+
+		if [ -n "$(git status --porcelain --untracked-files=normal)" ]; then
+			git -C "${REPO_ROOT}" status --short
+			err "Qualification modified the working tree. Nothing was tagged."
+		fi
 	fi
 
 	msg "Bumping $bump_type version: $current_version → $new_version"
