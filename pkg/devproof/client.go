@@ -27,6 +27,7 @@ import (
 	"github.com/thingzio/devproof/pkg/bundle"
 	"github.com/thingzio/devproof/pkg/evidence"
 	"github.com/thingzio/devproof/pkg/fault"
+	"github.com/thingzio/devproof/pkg/policy"
 	"github.com/thingzio/devproof/pkg/source"
 	sourcegit "github.com/thingzio/devproof/pkg/source/git"
 	sourcepath "github.com/thingzio/devproof/pkg/source/path"
@@ -329,6 +330,18 @@ func (c *Client) effectiveLimits(request Limits) bundle.Resolved {
 		bundle.Input{Origin: bundle.OriginClient, Limits: c.limits},
 		bundle.Input{Origin: bundle.OriginRequest, Limits: request},
 	)
+}
+
+// limitsFor resolves the bounds one operation runs under.
+//
+// One call site, before any I/O, so every stage of that operation is bounded
+// by the same numbers. Resolving per stage was how a policy's limits came to
+// apply to evidence discovery and nothing else.
+func (c *Client) limitsFor(request Limits, doc *policy.Document, havePolicy bool) bundle.Resolved {
+	if !havePolicy || doc == nil {
+		return c.effectiveLimits(request)
+	}
+	return c.effectiveLimitsWithPolicy(request, doc.Spec.Limits)
 }
 
 // effectiveLimitsWithPolicy adds a policy's limits to the intersection.

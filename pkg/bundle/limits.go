@@ -229,6 +229,36 @@ func (r Resolved) Origin(b Bound) Origin {
 	return OriginDefault
 }
 
+// Effective is one bound's resolved value and where it came from.
+type Effective struct {
+	Bound  Bound
+	Name   string
+	Value  int64
+	Origin Origin
+}
+
+// Each returns every bound with its effective value and origin, in declaration
+// order.
+//
+// DP-021 says a verification result records which input supplied each
+// effective value. It could not, because nothing could enumerate them: Origin
+// answered for one bound at a time and the bound list was unexported, so a
+// caller had to know every name in advance to ask. Adding a bound now reaches
+// the report without anyone remembering to extend it.
+func (r Resolved) Each() []Effective {
+	out := make([]Effective, 0, len(boundFields))
+	for _, f := range boundFields {
+		limits := r.Limits
+		out = append(out, Effective{
+			Bound:  f.bound,
+			Name:   f.name,
+			Value:  *f.get(&limits),
+			Origin: r.Origin(f.bound),
+		})
+	}
+	return out
+}
+
 // Input is one contributor to the effective limits.
 type Input struct {
 	Origin Origin

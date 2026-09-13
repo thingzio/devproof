@@ -376,7 +376,7 @@ func (c *Client) Lock(ctx context.Context, req LockRequest) (_ *LockResult, retE
 	if req.Check {
 		existing := req.ExistingLock
 		if existing == nil {
-			loaded, loadErr := loadLockFile(outputPath)
+			loaded, loadErr := loadLockFile(outputPath, limits.Limits.MaxLockBytes)
 			if loadErr != nil {
 				return nil, loadErr
 			}
@@ -436,9 +436,10 @@ func (c *Client) loadSpec(req BuildRequest) (*bundle.Spec, string, error) {
 		return req.Spec, req.SpecDir, nil
 
 	default:
-		data, err := os.ReadFile(req.SpecPath) //nolint:gosec // caller-supplied manifest path
+		data, err := readBounded(req.SpecPath, "manifest",
+			c.effectiveLimits(req.Limits).Limits.MaxSpecBytes)
 		if err != nil {
-			return nil, "", fault.Wrap(fault.CodeInvalidInput, "build", "reading manifest", err)
+			return nil, "", err
 		}
 		spec, err := bundle.ParseSpec(data)
 		if err != nil {
@@ -462,6 +463,8 @@ const directSourceName = "source"
 // point of committing one: a build that ignored it unless asked would make
 // reproducibility opt-in (DP-004).
 func (c *Client) loadLock(req BuildRequest, baseDir string) (_ *bundle.Lock, found bool, _ error) {
+	lockLimit := c.effectiveLimits(req.Limits).Limits.MaxLockBytes
+
 	switch {
 	case req.SkipLock && req.UpdateLock:
 		return nil, false, fault.New(fault.CodeInvalidInput, "build",
@@ -471,7 +474,7 @@ func (c *Client) loadLock(req BuildRequest, baseDir string) (_ *bundle.Lock, fou
 	case req.Lock != nil:
 		return req.Lock, true, req.Lock.Validate()
 	case req.LockPath != "":
-		lock, err := loadLockFile(req.LockPath)
+		lock, err := loadLockFile(req.LockPath, lockLimit)
 		return lock, err == nil, err
 	case req.SourcePath != "":
 		// A direct build has no manifest directory to look beside.
@@ -484,14 +487,14 @@ func (c *Client) loadLock(req BuildRequest, baseDir string) (_ *bundle.Lock, fou
 		// been locked yet, not a failure.
 		return nil, false, nil
 	}
-	lock, err := loadLockFile(beside)
+	lock, err := loadLockFile(beside, lockLimit)
 	return lock, err == nil, err
 }
 
-func loadLockFile(path string) (*bundle.Lock, error) {
-	data, err := os.ReadFile(path) //nolint:gosec // caller-supplied lock path
+func loadLockFile(path string, limit int64) (*bundle.Lock, error) {
+	data, err := readBounded(path, "lock", limit)
 	if err != nil {
-		return nil, fault.Wrap(fault.CodeInvalidInput, "build", "reading lock", err)
+		return nil, err
 	}
 	return bundle.ParseLock(data)
 }
@@ -572,7 +575,14 @@ func (c *Client) Verify(ctx context.Context, req VerifyRequest) (*policy.Report,
 		req.RequireDigest = true
 	}
 
-	subject, pinned, err := c.loadSubject(ctx, req, checkPayload)
+	// Resolved once, here, before anything is fetched. A policy may tighten a
+	// bound and never relax one (DP-021), but that only holds if the policy's
+	// limits reach the stage that enforces them -- and they previously
+	// reached evidence discovery alone, so a policy could not bound the
+	// payload it was gating.
+	limits := c.limitsFor(req.Limits, doc, havePolicy)
+
+	subject, pinned, err := c.loadSubject(ctx, req, limits, checkPayload)
 	if err != nil {
 		return nil, err
 	}
@@ -582,6 +592,7 @@ func (c *Client) Verify(ctx context.Context, req VerifyRequest) (*policy.Report,
 		// matched it against its descriptor, and checked every entry against
 		// the inventory before returning.
 		report := integrityReport(subject, policy.StatusPass)
+		report.Limits = limitRecords(limits)
 		report.AddFinding(policy.Finding{
 			Code:     policy.FindingPolicyNotSupplied,
 			Severity: policy.SeverityWarning,
@@ -591,7 +602,7 @@ func (c *Client) Verify(ctx context.Context, req VerifyRequest) (*policy.Report,
 		return report, nil
 	}
 
-	return c.evaluatePolicy(ctx, doc, subject, pinned, req)
+	return c.evaluatePolicy(ctx, doc, subject, pinned, req, limits)
 }
 
 // loadPolicy resolves which policy a request supplies.
@@ -625,16 +636,13 @@ func (c *Client) evaluatePolicy(
 	subject *canonical.Subject,
 	pinned artifact.Reference,
 	req VerifyRequest,
+	limits bundle.Resolved,
 ) (*policy.Report, error) {
 
 	transport, err := c.transportFor(pinned)
 	if err != nil {
 		return nil, err
 	}
-
-	// Policy limits intersect with the client's and the request's; a policy
-	// may tighten a bound and never relax one (DP-021).
-	limits := c.effectiveLimitsWithPolicy(req.Limits, doc.Spec.Limits)
 
 	verified, rejected, storage, err := c.discoverEvidence(ctx, transport, pinned, subject, limits.Limits)
 	if err != nil {
@@ -673,6 +681,7 @@ func (c *Client) evaluatePolicy(
 
 	report := policy.Evaluate(doc, input)
 	report.TreeDigest = subject.TreeDigest.String()
+	report.Limits = limitRecords(limits)
 	report.PolicyName = doc.Metadata.Name
 	report.EvaluatedAt = evaluatedAt.UTC().Format(time.RFC3339)
 	report.EvidenceStorage = storage
@@ -737,8 +746,6 @@ func (c *Client) Expand(ctx context.Context, req ExpandRequest) (_ *ExpandResult
 		return nil, fault.New(fault.CodeInvalidInput, "expand", "a destination is required")
 	}
 
-	limits := c.effectiveLimits(req.Limits)
-
 	verification := VerifyRequest{
 		Reference:     req.Reference,
 		RequireDigest: req.RequireDigest,
@@ -755,7 +762,14 @@ func (c *Client) Expand(ctx context.Context, req ExpandRequest) (_ *ExpandResult
 		verification.RequireDigest = true
 	}
 
-	subject, pinned, err := c.loadSubject(ctx, verification, metadataOnly)
+	// After the policy is loaded, not before. Limits were resolved first and
+	// so could never include the policy's, which meant a policy could tighten
+	// the bounds on evidence discovery while the expansion it was gating ran
+	// under the caller's own numbers -- the one stage where a bound decides
+	// how much gets written to disk.
+	limits := c.limitsFor(req.Limits, doc, havePolicy)
+
+	subject, pinned, err := c.loadSubject(ctx, verification, limits, metadataOnly)
 	if err != nil {
 		return nil, err
 	}
@@ -765,7 +779,7 @@ func (c *Client) Expand(ctx context.Context, req ExpandRequest) (_ *ExpandResult
 	// the extractor has returned.
 	report := integrityReport(subject, policy.StatusNotEvaluated)
 	if havePolicy {
-		report, err = c.evaluatePolicy(ctx, doc, subject, pinned, verification)
+		report, err = c.evaluatePolicy(ctx, doc, subject, pinned, verification, limits)
 		if err != nil {
 			return nil, err
 		}
@@ -824,6 +838,7 @@ func (c *Client) Expand(ctx context.Context, req ExpandRequest) (_ *ExpandResult
 	// trust as not-evaluated for an expansion that a policy had just gated.
 	// The gate was closed; the answer about it was false.
 	report.Integrity = policy.StatusPass
+	report.Limits = limitRecords(limits)
 
 	return &ExpandResult{
 		Destination:   result.Destination,
@@ -878,6 +893,7 @@ const (
 func (c *Client) loadSubject(
 	ctx context.Context,
 	req VerifyRequest,
+	limits bundle.Resolved,
 	payload payloadCheck,
 ) (*canonical.Subject, artifact.Reference, error) {
 
@@ -906,7 +922,6 @@ func (c *Client) loadSubject(
 		return nil, ref, err
 	}
 
-	limits := c.effectiveLimits(req.Limits)
 	return c.fetchSubject(ctx, transport, ref, limits.Limits, payload)
 }
 
@@ -1062,11 +1077,13 @@ func (c *Client) Copy(ctx context.Context, req CopyRequest) (_ *CopyResult, retE
 		return nil, err
 	}
 
+	limits := c.effectiveLimits(req.Limits)
+
 	subject, pinned, err := c.loadSubject(ctx, VerifyRequest{
 		Reference:     req.Source,
 		RequireDigest: req.RequireDigest,
 		Limits:        req.Limits,
-	}, checkPayload)
+	}, limits, checkPayload)
 	if err != nil {
 		return nil, err
 	}
@@ -1075,8 +1092,6 @@ func (c *Client) Copy(ctx context.Context, req CopyRequest) (_ *CopyResult, retE
 	if err != nil {
 		return nil, err
 	}
-
-	limits := c.effectiveLimits(req.Limits)
 	layerDescriptor := subject.LayerDescriptor()
 	if validateErr := layerDescriptor.Validate(); validateErr != nil {
 		return nil, validateErr
@@ -1125,4 +1140,50 @@ func (c *Client) Copy(ctx context.Context, req CopyRequest) (_ *CopyResult, retE
 		Destination:   published.String(),
 		Tag:           tag,
 	}, nil
+}
+
+// limitRecords turns resolved limits into what a report carries.
+//
+// Every bound, not only the tightened ones: DP-021 says the result records
+// which input supplied each effective value, and a reader cannot tell that a
+// bound was left at its default from its absence.
+func limitRecords(limits bundle.Resolved) []policy.Limit {
+	effective := limits.Each()
+	out := make([]policy.Limit, 0, len(effective))
+	for _, bound := range effective {
+		out = append(out, policy.Limit{
+			Name:   bound.Name,
+			Value:  bound.Value,
+			Origin: string(bound.Origin),
+		})
+	}
+	return out
+}
+
+// readBounded reads a file, refusing one larger than its documented limit.
+//
+// The limits existed and were never applied: manifests, locks, and policies
+// were read with an unbounded os.ReadFile, so maxSpecBytes and maxLockBytes
+// described a bound nothing enforced. These are local files a caller chose,
+// which is why this is a bound rather than a defense, but a limit that is
+// documented and absent is worse than one that was never offered.
+//
+// One byte past the limit is read deliberately, so exceeding it is detected
+// rather than silently truncated into a parse error further along.
+func readBounded(path, what string, limit int64) ([]byte, error) {
+	file, err := os.Open(path) //nolint:gosec // caller-supplied path
+	if err != nil {
+		return nil, fault.Wrap(fault.CodeInvalidInput, "read", "reading "+what, err)
+	}
+	defer func() { _ = file.Close() }()
+
+	data, err := io.ReadAll(io.LimitReader(file, limit+1))
+	if err != nil {
+		return nil, fault.Wrap(fault.CodeInvalidInput, "read", "reading "+what, err)
+	}
+	if int64(len(data)) > limit {
+		return nil, fault.New(fault.CodeLimitExceeded, "read",
+			fmt.Sprintf("%s exceeds the limit of %d bytes", what, limit)).WithPath(path)
+	}
+	return data, nil
 }

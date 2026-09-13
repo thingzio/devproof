@@ -14,13 +14,13 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-// Package examples_test runs the walkthrough in README.md.
+// Package tamperandtrust_test runs the walkthrough in README.md.
 //
 // The demo makes claims about tamper detection and gating that were not true
 // of this code a week ago, and a reader has no way to tell a demonstration
 // from a description. Extracting the commands out of the document and running
 // them is what keeps the two the same thing.
-package examples_test
+package tamperandtrust_test
 
 import (
 	"os"
@@ -43,7 +43,7 @@ func buildCLI(t *testing.T) string {
 	dir := t.TempDir()
 	cmd := exec.Command("go", "build", "-o", filepath.Join(dir, "devproof"),
 		"github.com/thingzio/devproof/cmd/devproof")
-	cmd.Dir = ".."
+	cmd.Dir = "../.."
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("building the CLI: %v\n%s", err, out)
 	}

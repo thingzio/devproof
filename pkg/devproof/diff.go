@@ -139,11 +139,16 @@ func (c *Client) Diff(ctx context.Context, req DiffRequest) (_ *DiffResult, retE
 			"supply two operands to compare")
 	}
 
-	from, fromFiles, err := c.diffOperand(ctx, req.From, req.Limits)
+	// Resolved once so both sides are read under identical bounds. Two
+	// operands bounded differently could report a difference that was an
+	// artifact of the comparison rather than of the content.
+	limits := c.effectiveLimits(req.Limits)
+
+	from, fromFiles, err := c.diffOperand(ctx, req.From, limits)
 	if err != nil {
 		return nil, err
 	}
-	to, toFiles, err := c.diffOperand(ctx, req.To, req.Limits)
+	to, toFiles, err := c.diffOperand(ctx, req.To, limits)
 	if err != nil {
 		return nil, err
 	}
@@ -243,7 +248,7 @@ func addedEntry(file *bundle.ConfigFile) DiffEntry {
 func (c *Client) diffOperand(
 	ctx context.Context,
 	operand string,
-	limits Limits,
+	limits bundle.Resolved,
 ) (*DiffSide, []bundle.ConfigFile, error) {
 
 	if isReference(operand) {
@@ -265,7 +270,7 @@ func isReference(operand string) bool {
 func (c *Client) diffFromBundle(
 	ctx context.Context,
 	reference string,
-	limits Limits,
+	limits bundle.Resolved,
 ) (*DiffSide, []bundle.ConfigFile, error) {
 
 	// checkPayload, because "identical" is an integrity claim. Comparing
@@ -273,8 +278,7 @@ func (c *Client) diffFromBundle(
 	// themselves, which is a weaker statement than the output implies.
 	subject, pinned, err := c.loadSubject(ctx, VerifyRequest{
 		Reference: reference,
-		Limits:    limits,
-	}, checkPayload)
+	}, limits, checkPayload)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -291,7 +295,7 @@ func (c *Client) diffFromBundle(
 func (c *Client) diffFromDirectory(
 	ctx context.Context,
 	dir string,
-	limits Limits,
+	limits bundle.Resolved,
 ) (_ *DiffSide, _ []bundle.ConfigFile, retErr error) {
 
 	spec, baseDir, err := sourcepath.DirectSpec(directSourceName, dir, "", nil, nil)
@@ -299,8 +303,7 @@ func (c *Client) diffFromDirectory(
 		return nil, nil, err
 	}
 
-	effective := c.effectiveLimits(limits)
-	resolved, err := c.resolveSpec(ctx, spec, baseDir, nil, effective.Limits)
+	resolved, err := c.resolveSpec(ctx, spec, baseDir, nil, limits.Limits)
 	if err != nil {
 		return nil, nil, err
 	}

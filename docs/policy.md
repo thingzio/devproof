@@ -218,8 +218,13 @@ The complete verification result is the DevProof proof report. It records:
 - accepted evidence descriptors and predicate types;
 - rejected candidate summaries;
 - evaluation time when applicable;
+- the effective resource limits and which input supplied each (DP-021);
 - individual findings; and
 - overall dimension statuses.
+
+Every bound appears, including the ones left at their defaults, because a
+reader cannot tell a default from an omission. Text output shows only the
+bounds somebody tightened; JSON carries all of them with their origins.
 
 The report is evidence of what DevProof evaluated under a particular policy. It
 is not itself signed unless a caller explicitly sends it to an attester, and it

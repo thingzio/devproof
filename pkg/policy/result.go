@@ -153,7 +153,29 @@ type Report struct {
 	// attached junk" stay distinguishable.
 	RejectedEvidence []string `json:"rejectedEvidence,omitempty"`
 
+	// Limits records the bounds this verification actually ran under and
+	// where each came from (DP-021).
+	//
+	// A limit is only meaningful if a consumer can tell which one applied. A
+	// policy that tightened maxExpandedBytes and a client that did are the
+	// same number in the result and very different facts about who decided
+	// it, and "the policy asked for a bound nothing applied" was previously
+	// indistinguishable from "the policy's bound held".
+	Limits []Limit `json:"limits,omitempty"`
+
 	Findings []Finding `json:"findings,omitempty"`
+}
+
+// Limit is one resource bound as it applied to a verification.
+type Limit struct {
+	// Name is the bound's stable name, matching the policy field that sets
+	// it.
+	Name string `json:"name"`
+	// Value is the effective bound: the smallest anybody asked for.
+	Value int64 `json:"value"`
+	// Origin is which input supplied that value: default, client, request,
+	// or policy.
+	Origin string `json:"origin"`
 }
 
 // OK reports whether the operation should be considered successful.

@@ -664,6 +664,13 @@ func renderReport(w io.Writer, report *policy.Report) {
 	if report.EvidenceStorage != "" {
 		Field(w, "evidence", report.EvidenceStorage)
 	}
+	// Only the bounds somebody deliberately tightened. The JSON report carries
+	// all fifteen with their origins, because a machine reading a result needs
+	// to know what every bound was; a person reading a terminal needs to know
+	// which ones were not the defaults.
+	if tightened := tightenedLimits(report); len(tightened) > 0 {
+		Field(w, "limits", strings.Join(tightened, ", "))
+	}
 	for _, finding := range report.Findings {
 		fmt.Fprintf(w, "  %s\n", finding)
 	}
@@ -733,4 +740,16 @@ func inspectQuiet(result *devproof.InspectResult) string {
 	default:
 		return ""
 	}
+}
+
+// tightenedLimits names the bounds that did not come from the defaults.
+func tightenedLimits(report *policy.Report) []string {
+	var out []string
+	for _, limit := range report.Limits {
+		if limit.Origin == "" || limit.Origin == string(bundle.OriginDefault) {
+			continue
+		}
+		out = append(out, fmt.Sprintf("%s=%d (%s)", limit.Name, limit.Value, limit.Origin))
+	}
+	return out
 }

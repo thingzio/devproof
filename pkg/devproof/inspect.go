@@ -215,8 +215,7 @@ func (c *Client) inspectSubject(ctx context.Context, req InspectRequest) (*Inspe
 	// claim, so it does not pay for the payload.
 	subject, pinned, err := c.loadSubject(ctx, VerifyRequest{
 		Reference: req.Reference,
-		Limits:    req.Limits,
-	}, metadataOnly)
+	}, c.effectiveLimits(req.Limits), metadataOnly)
 	if err != nil {
 		return nil, err
 	}
