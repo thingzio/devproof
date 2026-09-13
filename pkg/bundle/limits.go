@@ -66,37 +66,42 @@ const (
 // A zero field means "unset" and inherits the default. Zero never means
 // unlimited: an unbounded extraction is the decompression-bomb case, and
 // spelling it as the zero value would make it the accidental default.
+// Every field carries explicit json and yaml tags. Without them yaml.v3
+// derives a key by lowercasing the whole field name, so a policy would have
+// had to spell MaxFiles as "maxfiles" -- a spelling no document used and none
+// should. The tags are the serialized names, and a policy is canonicalized by
+// them, so they are a compatibility surface rather than a formatting choice.
 type Limits struct {
 	// MaxFiles bounds the number of files in a bundle.
-	MaxFiles int64
+	MaxFiles int64 `json:"maxFiles,omitempty" yaml:"maxFiles,omitempty"`
 	// MaxFileBytes bounds any single file's size.
-	MaxFileBytes int64
+	MaxFileBytes int64 `json:"maxFileBytes,omitempty" yaml:"maxFileBytes,omitempty"`
 	// MaxExpandedBytes bounds the total uncompressed payload.
-	MaxExpandedBytes int64
+	MaxExpandedBytes int64 `json:"maxExpandedBytes,omitempty" yaml:"maxExpandedBytes,omitempty"`
 	// MaxCompressedBytes bounds the compressed layer.
-	MaxCompressedBytes int64
+	MaxCompressedBytes int64 `json:"maxCompressedBytes,omitempty" yaml:"maxCompressedBytes,omitempty"`
 	// MaxCompressionRatio bounds expanded bytes divided by compressed bytes.
-	MaxCompressionRatio int64
+	MaxCompressionRatio int64 `json:"maxCompressionRatio,omitempty" yaml:"maxCompressionRatio,omitempty"`
 	// MaxPathBytes bounds a canonical path's UTF-8 length.
-	MaxPathBytes int64
+	MaxPathBytes int64 `json:"maxPathBytes,omitempty" yaml:"maxPathBytes,omitempty"`
 	// MaxPathSegmentBytes bounds one path segment's UTF-8 length.
-	MaxPathSegmentBytes int64
+	MaxPathSegmentBytes int64 `json:"maxPathSegmentBytes,omitempty" yaml:"maxPathSegmentBytes,omitempty"`
 	// MaxPathDepth bounds a canonical path's segment count.
-	MaxPathDepth int64
+	MaxPathDepth int64 `json:"maxPathDepth,omitempty" yaml:"maxPathDepth,omitempty"`
 	// MaxConfigBytes bounds the DevProof config blob.
-	MaxConfigBytes int64
+	MaxConfigBytes int64 `json:"maxConfigBytes,omitempty" yaml:"maxConfigBytes,omitempty"`
 	// MaxManifestBytes bounds the OCI manifest.
-	MaxManifestBytes int64
+	MaxManifestBytes int64 `json:"maxManifestBytes,omitempty" yaml:"maxManifestBytes,omitempty"`
 	// MaxSpecBytes bounds a manifest document.
-	MaxSpecBytes int64
+	MaxSpecBytes int64 `json:"maxSpecBytes,omitempty" yaml:"maxSpecBytes,omitempty"`
 	// MaxLockBytes bounds a lock document.
-	MaxLockBytes int64
+	MaxLockBytes int64 `json:"maxLockBytes,omitempty" yaml:"maxLockBytes,omitempty"`
 	// MaxReferrers bounds how many referrer descriptors are enumerated.
-	MaxReferrers int64
+	MaxReferrers int64 `json:"maxReferrers,omitempty" yaml:"maxReferrers,omitempty"`
 	// MaxEvidenceBytes bounds one evidence object.
-	MaxEvidenceBytes int64
+	MaxEvidenceBytes int64 `json:"maxEvidenceBytes,omitempty" yaml:"maxEvidenceBytes,omitempty"`
 	// MaxParallelSources bounds concurrent source resolution.
-	MaxParallelSources int64
+	MaxParallelSources int64 `json:"maxParallelSources,omitempty" yaml:"maxParallelSources,omitempty"`
 }
 
 // MaxRepresentableFileBytes is the largest file format v1 can encode: eleven
