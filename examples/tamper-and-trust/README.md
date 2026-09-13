@@ -11,11 +11,11 @@ afterwards.
 You need `devproof` on your `PATH` ([install](../../README.md#install)) and
 `python3`, used once to read a digest out of JSON.
 
-> **Step 5 needs a build newer than `v0.1.1`.** Check with `devproof version`.
-> Standalone `verify` did not read the payload before that fix, so on `v0.1.1`
-> the tampered artifact in that step still reports `integrity: pass` — which
-> is the behaviour the fix removed, not the one the step is demonstrating.
-> Every other step works on any version.
+> **Step 5 needs `v0.2.0` or newer.** Check with `devproof version`. Standalone
+> `verify` did not read the payload before that release, so on `v0.1.1` the
+> tampered artifact in that step still reports `integrity: pass` — which is the
+> behaviour the fix removed, not the one the step demonstrates. Every other
+> step works on any version.
 
 ```bash
 mkdir devproof-demo && cd devproof-demo
@@ -243,10 +243,9 @@ checking it is.
 - **Tampering caught by reading the bytes.** Untouched metadata did not help
   the altered copy, and an identical artifact beside it still verified.
 
-Not shown here: signing and trust policy against a real identity, registries,
-and air-gapped transfer. `--offline` and policy `limits` are deliberately
-absent — both are documented but not yet enforced end to end, and a demo
-should not exercise a control that does not work.
+Not shown here, to keep this to five minutes: signing and trust policy against
+a real identity, registries, air-gapped transfer with `--offline`, and
+resource bounds set by a policy.
 
 Clean up with `cd .. && rm -rf devproof-demo`.
 
