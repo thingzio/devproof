@@ -144,7 +144,14 @@ func TestExitCodeThroughWrapping(t *testing.T) {
 	}
 }
 
-// There is deliberately no exit code 1: every failure is classified.
+// No failure exits 1: every failure is classified, and a bare 1 would hide
+// which class.
+//
+// Exit 1 does exist -- ExitDifferences, which `diff` returns when the two
+// sides are not the same. That is a successful comparison with a negative
+// answer, reachable only from a result and never from an error, which is what
+// this test keeps true. If a Code ever mapped here, a script branching on
+// "they differ" would start treating failures as differences.
 func TestExitCodeNeverReturnsOne(t *testing.T) {
 	t.Parallel()
 

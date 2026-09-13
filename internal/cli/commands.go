@@ -147,6 +147,99 @@ func manifestRelativeSource(manifestPath, src string) (string, error) {
 	return "./" + rel, nil
 }
 
+func (a *App) diffCommand() *cli.Command {
+	return &cli.Command{
+		Name:      "diff",
+		Usage:     "compare two canonical trees",
+		ArgsUsage: "FROM TO",
+		Description: "Compares two bundles, two directories, or one of each. An operand\n" +
+			"carrying a :// scheme is read as an OCI reference; anything else is a\n" +
+			"local directory, canonicalized exactly as a build would canonicalize it.\n\n" +
+			"Exit 0 means the two are identical, exit 1 means they differ. A differing\n" +
+			"result is an answer, not a failure, so it carries no error.",
+		Flags: []cli.Flag{
+			&cli.BoolFlag{Name: "quiet-if-same",
+				Usage: "print nothing when the two sides are identical"},
+		},
+		Action: func(ctx context.Context, cmd *cli.Command) error {
+			ctx, cancel := a.withTimeout(ctx)
+			defer cancel()
+
+			if cmd.Args().Len() != 2 {
+				return fault.New(fault.CodeInvalidInput, "diff",
+					"supply exactly two operands: devproof diff FROM TO")
+			}
+
+			client, err := a.client(cmd)
+			if err != nil {
+				return err
+			}
+			defer func() { _ = client.Close() }()
+
+			a.printer.Progress().Step("reading both sides")
+			result, err := client.Diff(ctx, devproof.DiffRequest{
+				From: cmd.Args().Get(0),
+				To:   cmd.Args().Get(1),
+			})
+			if err != nil {
+				return err
+			}
+
+			if !result.Identical {
+				a.exitCode = fault.ExitDifferences
+			}
+			if result.Identical && cmd.Bool("quiet-if-same") {
+				return nil
+			}
+
+			// Quiet output is the one-word answer, so a script can branch on
+			// the text as readily as on the exit code.
+			quiet := "differ"
+			if result.Identical {
+				quiet = "identical"
+			}
+			return a.printer.Result("DiffResult", result, quiet, func(w io.Writer) {
+				Field(w, "from", result.From.TreeDigest)
+				Field(w, "to", result.To.TreeDigest)
+				if result.Identical {
+					Field(w, "result", "identical")
+					return
+				}
+				Field(w, "added", fmt.Sprint(result.Added))
+				Field(w, "removed", fmt.Sprint(result.Removed))
+				Field(w, "modified", fmt.Sprint(result.Modified))
+				if result.ModeChanged > 0 {
+					Field(w, "mode changed", fmt.Sprint(result.ModeChanged))
+				}
+				fmt.Fprintln(w)
+				for _, change := range result.Changes {
+					fmt.Fprintf(w, "%s %s\n", diffMarker(change.Change), change.Path)
+				}
+			})
+		},
+	}
+}
+
+// diffMarker is the one-character prefix each change kind prints with.
+//
+// The first three follow diff's own convention so they need no explanation.
+// A mode change gets its own marker because printing it as a modification
+// would claim the bytes changed when they did not.
+func diffMarker(change devproof.Change) string {
+	switch change {
+	case devproof.ChangeAdded:
+		return "+"
+	case devproof.ChangeRemoved:
+		return "-"
+	case devproof.ChangeModified:
+		return "~"
+	case devproof.ChangeModeChanged:
+		return "m"
+	default:
+		return "?"
+	}
+}
+
 func (a *App) lockCommand() *cli.Command {
 	return &cli.Command{
 		Name:  "lock",

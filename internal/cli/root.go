@@ -58,6 +58,10 @@ type App struct {
 	// is written by the signal goroutine and read on the failure path, so it
 	// is atomic rather than a plain bool.
 	interrupted atomic.Bool
+	// exitCode lets a command that succeeded report a negative answer. It is
+	// a plain int because only a command action writes it, synchronously,
+	// and it is read after that action has returned.
+	exitCode int
 }
 
 // Run executes the command line and returns a process exit code.
@@ -101,6 +105,12 @@ func Run(ctx context.Context, args []string, streams Streams) int {
 	if err := app.command().Run(ctx, args); err != nil {
 		return app.printer.Failure(err, app.interrupted.Load())
 	}
+	// A command that succeeded may still have a negative answer to report.
+	// Only `diff` sets this, and only to ExitDifferences; an unset value is
+	// success, so no command has to opt in to exiting zero.
+	if app.exitCode != fault.ExitSuccess {
+		return app.exitCode
+	}
 	return fault.ExitSuccess
 }
 
@@ -126,6 +136,7 @@ func (a *App) command() *cli.Command {
 		a.buildCommand(),
 		a.verifyCommand(),
 		a.expandCommand(),
+		a.diffCommand(),
 		a.copyCommand(),
 		a.inspectCommand(),
 		a.versionCommand(),

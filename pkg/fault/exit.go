@@ -24,11 +24,22 @@ import (
 // CLI exit codes. Deliberately coarser than Code so that shell callers can
 // branch on them stably while the JSON envelope carries the finer code.
 //
-// There is no exit code 1: every failure DevProof produces is classified, and
-// a bare 1 would hide which class. See DP-023.
+// No failure exits 1: every failure DevProof produces is classified, and a
+// bare 1 would hide which class. Exit 1 is reserved for the opposite case — an
+// operation that completed successfully and whose answer is "no". See DP-023.
 const (
 	// ExitSuccess reports a completed operation.
 	ExitSuccess = 0
+	// ExitDifferences reports a successful comparison that found differences.
+	//
+	// This is not a failure: the command did exactly what was asked and the
+	// answer is that the two sides are not the same. It follows the
+	// convention `diff`, `grep`, and `git diff --exit-code` established, so
+	// that a shell can branch on the answer without parsing output.
+	//
+	// No Code maps here. An error means DevProof could not answer the
+	// question; this means it answered.
+	ExitDifferences = 1
 	// ExitUsage reports a command usage, manifest, lock, or version error.
 	ExitUsage = 2
 	// ExitSource reports source resolution, stale lock, unsafe path, or
