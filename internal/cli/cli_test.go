@@ -505,7 +505,7 @@ func TestEveryCommandHasHelp(t *testing.T) {
 	t.Parallel()
 
 	for _, command := range []string{
-		"lock", "build", "verify", "expand", "copy", "inspect", "version",
+		"init", "lock", "build", "verify", "expand", "copy", "inspect", "version",
 	} {
 		t.Run(command, func(t *testing.T) {
 			t.Parallel()

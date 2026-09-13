@@ -121,6 +121,7 @@ func onUsageError(_ context.Context, _ *cli.Command, err error, _ bool) error {
 
 func (a *App) command() *cli.Command {
 	commands := []*cli.Command{
+		a.initCommand(),
 		a.lockCommand(),
 		a.buildCommand(),
 		a.verifyCommand(),

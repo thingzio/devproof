@@ -433,6 +433,45 @@ func TestPolicyLimitCeilingsMatchCode(t *testing.T) {
 	}
 }
 
+// TestInitTemplateValidatesAgainstTheSchema closes the loop between the
+// scaffold and the specification.
+//
+// `devproof init` exists so nobody has to read the schema to write a
+// well-formed manifest. That promise is only worth making if the file it
+// writes is actually well-formed by the schema's own account, rather than
+// merely by the decoder's.
+func TestInitTemplateValidatesAgainstTheSchema(t *testing.T) {
+	t.Parallel()
+
+	for _, sourcePath := range []string{".", "./content", "../sibling"} {
+		t.Run(sourcePath, func(t *testing.T) {
+			t.Parallel()
+
+			rendered, err := bundle.Template(sourcePath)
+			if err != nil {
+				t.Fatalf("rendering the template: %v", err)
+			}
+
+			// The template is YAML with comments, so it reaches the schema
+			// through the typed model. That is the same path a manifest takes
+			// on the way to its digest.
+			spec, err := bundle.ParseSpec(rendered)
+			if err != nil {
+				t.Fatalf("the template does not parse: %v", err)
+			}
+			encoded, err := json.Marshal(spec)
+			if err != nil {
+				t.Fatalf("encoding the parsed template: %v", err)
+			}
+
+			if err := compile(t, schema.Bundle).Validate(asJSONValue(t, encoded)); err != nil {
+				t.Errorf("the manifest init writes does not satisfy the published "+
+					"schema:\n%v", err)
+			}
+		})
+	}
+}
+
 // TestGoldenConfigValidates points the config schema at the normative format
 // fixture.
 //

@@ -18,19 +18,134 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/urfave/cli/v3"
 
+	"github.com/thingzio/devproof/pkg/bundle"
 	"github.com/thingzio/devproof/pkg/devproof"
+	"github.com/thingzio/devproof/pkg/fault"
 	"github.com/thingzio/devproof/pkg/policy"
 )
 
 // flagRequireDigest rejects a tag before anything is fetched. Shared by every
 // command that reads a subject.
 const flagRequireDigest = "require-digest"
+
+// initResult is what `init` reports.
+type initResult struct {
+	Manifest string `json:"manifest"`
+	Source   string `json:"source"`
+}
+
+func (a *App) initCommand() *cli.Command {
+	return &cli.Command{
+		Name:  "init",
+		Usage: "write a starter bundle manifest",
+		Description: "Writes a commented devproof.yaml describing one local source, so that\n" +
+			"a first manifest does not require reading the schema. The comments cover\n" +
+			"the git source type, filtering, and mount paths.\n\n" +
+			"It never overwrites: a manifest is hand-edited, and regenerating one on\n" +
+			"top of your edits is not a thing a scaffold should be able to do.",
+		Flags: []cli.Flag{
+			&cli.StringFlag{Name: "src",
+				Usage: "directory the manifest's source reads", Value: "."},
+			&cli.StringFlag{Name: "to",
+				Usage: "where to write the manifest", Value: bundle.DefaultSpecName},
+		},
+		Action: func(_ context.Context, cmd *cli.Command) error {
+			manifestPath := cmd.String("to")
+			source := cmd.String("src")
+
+			// Warn rather than fail: a scaffold is often written before the
+			// directory it points at exists, and refusing would force people
+			// to create an empty directory just to get a starting file.
+			if info, err := os.Stat(source); err != nil {
+				a.printer.Warn("source %s does not exist yet; "+
+					"create it before running devproof lock", source)
+			} else if !info.IsDir() {
+				a.printer.Warn("source %s is a file, not a directory", source)
+			}
+
+			recorded, err := manifestRelativeSource(manifestPath, source)
+			if err != nil {
+				a.printer.Warn("recording %s as written, because it could not be "+
+					"expressed relative to the manifest: %v", source, err)
+				recorded = source
+			}
+
+			rendered, err := bundle.Template(recorded)
+			if err != nil {
+				return err
+			}
+
+			// O_EXCL makes "must not exist" and "create it" one operation, so
+			// a manifest appearing between a check and a write cannot be
+			// clobbered by the race that a stat-then-create would leave open.
+			file, err := os.OpenFile(manifestPath,
+				os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644) //nolint:gosec // a manifest is world-readable
+			if err != nil {
+				if errors.Is(err, os.ErrExist) {
+					return fault.New(fault.CodeDestinationExists, "init",
+						fmt.Sprintf("%s already exists; "+
+							"edit it, or use --to to write elsewhere", manifestPath)).
+						WithPath(manifestPath)
+				}
+				return fault.Wrap(fault.CodeInvalidInput, "init",
+					"creating the manifest", err).WithPath(manifestPath)
+			}
+			if _, err := file.Write(rendered); err != nil {
+				_ = file.Close()
+				return fault.Wrap(fault.CodeInvalidInput, "init",
+					"writing the manifest", err).WithPath(manifestPath)
+			}
+			if err := file.Close(); err != nil {
+				return fault.Wrap(fault.CodeInvalidInput, "init",
+					"closing the manifest", err).WithPath(manifestPath)
+			}
+
+			result := initResult{Manifest: manifestPath, Source: recorded}
+			return a.printer.Result("InitResult", result, manifestPath, func(w io.Writer) {
+				Field(w, "manifest", manifestPath)
+				Field(w, "source", recorded)
+				Field(w, "next", "edit metadata.name, then run devproof lock")
+			})
+		},
+	}
+}
+
+// manifestRelativeSource expresses src relative to the manifest's directory.
+//
+// Source paths in a manifest resolve against the manifest, not the working
+// directory, so writing the string the user typed would silently mean
+// something else whenever the two differ. An absolute path would also need
+// the caller to enable absolute local sources, which a starter file should
+// not quietly require.
+func manifestRelativeSource(manifestPath, src string) (string, error) {
+	absManifest, err := filepath.Abs(manifestPath)
+	if err != nil {
+		return "", err
+	}
+	absSource, err := filepath.Abs(src)
+	if err != nil {
+		return "", err
+	}
+	rel, err := filepath.Rel(filepath.Dir(absManifest), absSource)
+	if err != nil {
+		return "", err
+	}
+	if rel == "." || strings.HasPrefix(rel, ".") {
+		return rel, nil
+	}
+	// "./content" rather than "content", matching how every example in the
+	// documentation spells a local path.
+	return "./" + rel, nil
+}
 
 func (a *App) lockCommand() *cli.Command {
 	return &cli.Command{

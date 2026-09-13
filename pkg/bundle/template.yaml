@@ -1,0 +1,69 @@
+# DevProof bundle manifest.
+#
+# This file records intent: what you want packaged, and where each piece
+# lands. It may name things that move -- a branch, a local directory. Turning
+# those into something immutable is the lock's job:
+#
+#   devproof lock
+#       resolve every source and write devproof.lock.json beside this file
+#
+#   devproof build -f devproof.yaml --to oci://registry.example.com/team/config
+#       build from this manifest and its lock, and publish the result
+#
+# Unknown fields are an error, so a misspelled key fails here rather than
+# silently not applying. Full schema:
+# https://devproof.thingz.io/schemas/bundle.v1alpha1.schema.json
+apiVersion: devproof.thingz.io/v1alpha1
+kind: Bundle
+
+metadata:
+  # Lowercase letters, digits, and hyphens, up to 63 characters. It appears in
+  # diagnostics and evidence and does NOT affect the bundle's digest: two
+  # bundles with the same content and different names are the same artifact.
+  name: my-bundle
+
+spec:
+  # Every file in the bundle has exactly one source that owns it. Two sources
+  # placing a file at the same path is an error even when the bytes are
+  # identical, and the order of this list is never precedence -- so there is
+  # no "last one wins" to reason about.
+  sources:
+    - name: content
+      type: path
+
+      # Where this source lands inside the bundle. "." is the bundle root.
+      mountPath: .
+
+      config:
+        # Resolved relative to this file's directory, not to wherever you
+        # happen to run the command from.
+        path: __SOURCE_PATH__
+
+    # ---------------------------------------------------------------------
+    # A second source, mounted beside the first. Uncomment and edit to use.
+    #
+    # A git source is pinned to the exact commit its ref resolved to when the
+    # lock was written, so a branch that moves afterwards cannot change what a
+    # locked build produces -- the build fails instead, and you re-lock on
+    # purpose.
+    # ---------------------------------------------------------------------
+    # - name: upstream
+    #   type: git
+    #   mountPath: vendor
+    #
+    #   # Glob patterns: * matches within one path segment, ** across
+    #   # segments. A file must match at least one include, and is then
+    #   # dropped if it matches any exclude. Both lists are treated as sets,
+    #   # so their order does not matter.
+    #   include:
+    #     - "config/**"
+    #     - "scripts/**"
+    #   exclude:
+    #     - "**/*.tmp"
+    #
+    #   config:
+    #     url: https://github.com/example/repo.git
+    #     # A branch, tag, or full commit SHA.
+    #     ref: v1.2.3
+    #     # Optional: package only this subtree of the repository.
+    #     subPath: deploy
