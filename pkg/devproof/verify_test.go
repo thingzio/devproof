@@ -354,3 +354,78 @@ func TestFailedPolicyStillWritesNothing(t *testing.T) {
 		t.Error("a refused expansion left a destination behind")
 	}
 }
+
+// TestBuildRefusesToReuseACorruptBlob covers a store that lies about itself.
+//
+// A layout is content-addressed, so a blob's file name is its digest and an
+// existing file at that name was assumed to hold those bytes. Assumed, not
+// checked: publishing into a layout whose blob had been truncated, corrupted
+// or replaced saw the path, skipped the write, and reported success. The
+// result named a digest the store could not serve.
+//
+// Content addressing is what makes reuse safe, and it only makes it safe if
+// somebody checks.
+func TestBuildRefusesToReuseACorruptBlob(t *testing.T) {
+	t.Parallel()
+
+	client := newClient(t)
+	source := writeSource(t, map[string]string{"config.yaml": "key: value\n"})
+	layout := filepath.Join(t.TempDir(), "layout")
+
+	if _, err := client.Build(t.Context(), devproof.BuildRequest{
+		SourcePath:  source,
+		Destination: "oci-layout://" + layout,
+		Tag:         "v1",
+	}); err != nil {
+		t.Fatalf("building: %v", err)
+	}
+
+	blob := layerBlob(t, layout)
+	if err := os.WriteFile(blob, []byte("CORRUPT"), 0o644); err != nil {
+		t.Fatalf("corrupting the layer: %v", err)
+	}
+
+	// The same content, into the same layout. Every blob it needs is already
+	// present by name, so this is the path that skipped the write.
+	_, err := client.Build(t.Context(), devproof.BuildRequest{
+		SourcePath:  source,
+		Destination: "oci-layout://" + layout,
+		Tag:         "v2",
+	})
+	if err == nil {
+		t.Fatal("a build succeeded over a corrupt blob and reported a digest " +
+			"the store cannot serve")
+	}
+	if code := codeOf(err); code != devproof.CodeDigestMismatch {
+		t.Errorf("code = %q, want digest-mismatch", code)
+	}
+}
+
+// TestBuildReusesAnIntactBlob guards the case the check must not break.
+//
+// Reuse is the normal path and the reason a layout is cheap to publish into
+// twice. Verifying an existing blob must confirm it, not replace it.
+func TestBuildReusesAnIntactBlob(t *testing.T) {
+	t.Parallel()
+
+	client := newClient(t)
+	source := writeSource(t, map[string]string{"config.yaml": "key: value\n"})
+	layout := filepath.Join(t.TempDir(), "layout")
+
+	first, err := client.Build(t.Context(), devproof.BuildRequest{
+		SourcePath: source, Destination: "oci-layout://" + layout, Tag: "v1",
+	})
+	if err != nil {
+		t.Fatalf("building: %v", err)
+	}
+	second, err := client.Build(t.Context(), devproof.BuildRequest{
+		SourcePath: source, Destination: "oci-layout://" + layout, Tag: "v2",
+	})
+	if err != nil {
+		t.Fatalf("rebuilding into the same layout: %v", err)
+	}
+	if first.SubjectDigest != second.SubjectDigest {
+		t.Errorf("the same content produced %s then %s",
+			first.SubjectDigest, second.SubjectDigest)
+	}
+}

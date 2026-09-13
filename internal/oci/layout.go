@@ -219,8 +219,9 @@ func (l *Layout) PutBlob(content []byte) (canonical.Digest, error) {
 
 	target := blobPath(digest)
 	if _, statErr := l.root.Stat(target); statErr == nil {
-		// Content-addressed: an existing blob at this digest already holds
-		// these bytes.
+		if err := l.verifyExistingBlob(target, digest); err != nil {
+			return canonical.Digest{}, err
+		}
 		return digest, nil
 	}
 
@@ -228,6 +229,45 @@ func (l *Layout) PutBlob(content []byte) (canonical.Digest, error) {
 		return canonical.Digest{}, err
 	}
 	return digest, nil
+}
+
+// verifyExistingBlob rehashes a blob that is already on disk.
+//
+// A layout is content-addressed, so a file's name is a claim about its
+// contents. Treating the name as proof meant publishing into a layout whose
+// blob had been truncated, corrupted, or replaced skipped the write and
+// reported success, naming a digest the store could not serve -- and the
+// cheapest way to reach that state is a crash partway through an earlier
+// write.
+//
+// This is the read that content addressing was supposed to save. It is worth
+// paying: dedup is only safe because the name determines the bytes, and that
+// holds only if somebody checks.
+//
+// The mismatch is an error rather than a repair. The correct bytes are in
+// hand and overwriting would be easy, which is exactly why it is wrong: the
+// same silent repair would paper over a deliberate substitution, and a store
+// that quietly fixed itself would never tell anyone it had been wrong.
+func (l *Layout) verifyExistingBlob(target string, want canonical.Digest) error {
+	file, err := l.root.Open(target)
+	if err != nil {
+		return fault.Wrap(fault.CodeInternal, layoutOp,
+			"reading an existing blob", err).WithPath(target)
+	}
+	defer func() { _ = file.Close() }()
+
+	hasher := sha256.New()
+	if _, err := io.Copy(hasher, file); err != nil {
+		return fault.Wrap(fault.CodeInternal, layoutOp,
+			"hashing an existing blob", err).WithPath(target)
+	}
+	if got := canonical.Digest(hasher.Sum(nil)); got != want {
+		return fault.New(fault.CodeDigestMismatch, layoutOp,
+			fmt.Sprintf("the layout already holds a blob named %s whose content "+
+				"hashes to %s; it is corrupt and was not replaced", want, got)).
+			WithPath(target)
+	}
+	return nil
 }
 
 // PutBlobStream stores a blob by streaming it, verifying as it goes.
@@ -243,9 +283,9 @@ func (l *Layout) PutBlob(content []byte) (canonical.Digest, error) {
 func (l *Layout) PutBlobStream(content io.Reader, want canonical.Digest, size int64) (retErr error) {
 	target := blobPath(want)
 	if _, statErr := l.root.Stat(target); statErr == nil {
-		// Content-addressed: an existing blob at this digest already holds
-		// these bytes.
-		return nil
+		// Rehashed rather than trusted; see verifyExistingBlob. Streamed, so
+		// checking a layer costs a read and not a resident copy of it.
+		return l.verifyExistingBlob(target, want)
 	}
 
 	if dir := filepath.Dir(target); dir != "." {
