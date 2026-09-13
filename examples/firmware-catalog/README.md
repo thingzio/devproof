@@ -35,7 +35,27 @@ makes that statement itself into something with an identity and a signature,
 so it can be pinned, diffed, transferred across an air gap, and checked on the
 far side.
 
-That is a narrow claim. It is also the one nobody else is making.
+That is a narrow claim, and it is worth being precise about how narrow.
+
+**`trust: pass` in this walkthrough means one key signed these bytes.** You
+generate that key in step 3 and then write a policy that trusts it, so it
+proves which key signed, not who owns the key and not that anyone authorised
+the contents. In production the identity would be an organisational one,
+distributed independently of the artifact. Here it is a key you made a moment
+ago.
+
+**Completeness and correctness are not checked.** `semantics: not-evaluated`
+is the honest answer and appears in every output below: a catalog missing a
+component, or naming a version that was never qualified, passes exactly as
+well as a correct one provided the accepted key signed it. Verifying *what a
+document says* would need a firmware schema, a required-component set, and a
+comparison against observed rack inventory — none of which is here, and the
+first of which DevProof deliberately does not define.
+
+**Nothing here authenticates firmware.** The catalog records filenames and
+versions. It does not carry package bytes, NVIDIA's package signatures, or
+CoRIM measurements, and it says nothing about a device's secure-boot or
+runtime state.
 
 ## Before you start
 
@@ -58,20 +78,26 @@ devproof build ./catalog/gb200-nvl72-1.3.10 --to oci-layout://./stack --tag gb20
 ```
 
 ```console
-reference:       oci-layout://./stack@sha256:65ab27289c09f644fe839c98222258ed0d6dba2073e5135e7be4b953d22eb1c7
-subject:         sha256:65ab27289c09f644fe839c98222258ed0d6dba2073e5135e7be4b953d22eb1c7
-tree digest:     sha256:48d778e8c5566c4a5c3682031dcf5b73f52f74aa28b190b9dfa76a9070c71c8d
+reference:       oci-layout://./stack@sha256:e48f5b2458b1663476770a590e695afa708c19fa02b1458e31d937a4db27dbb6
+subject:         sha256:e48f5b2458b1663476770a590e695afa708c19fa02b1458e31d937a4db27dbb6
+tree digest:     sha256:55b379a5f758b0dd4f7d3397b0bfe73e54df8b8cf200df705195391c4a180e2c
 format:          devproof-bundle-v1
-files:           37
-bytes:           7141
-layer bytes:     1810
+files:           48
+bytes:           9414
+layer bytes:     2128
 tag:             gb200-1.3.10
 ```
 
-Thirty-seven components, one digest. `gb200-1.3.10` is a label somebody typed
-and could type differently tomorrow; `sha256:65ab2728…` is what the stack
-*is*. Two people who quote that digest are talking about the same set of
-versions, with no further coordination.
+Forty-seven components plus a `SOURCE.yaml` recording where they came from, so
+forty-eight files and one digest. `gb200-1.3.10` is a label somebody typed and
+could type differently tomorrow; `sha256:e48f5b24…` is what the stack *is*.
+Two people who quote that digest are talking about the same set of versions,
+with no further coordination.
+
+Rebuilding tomorrow produces that same digest. The catalog is a pure function
+of the two published pages — the date it was retrieved is recorded in this
+document, not inside the artifact, because anything inside would reach the
+digest and make identical content change its name overnight.
 
 One file per component, grouped by subsystem, because the granularity of the
 artifact decides the granularity of every later answer. A catalog kept as one
@@ -88,9 +114,9 @@ devproof diff ./catalog/gb200-nvl72-1.3.10 ./catalog/gb300-nvl72-1.0.10
 ```
 
 ```console
-added:           19
-removed:         7
-modified:        21
+added:           21
+removed:         8
+modified:        31
 
 ~ SOURCE.yaml
 ~ bmc-fpga-erot/bmc.yaml
@@ -151,18 +177,18 @@ says who did.
 openssl ecparam -name prime256v1 -genkey -noout -out signer.pem
 openssl ec -in signer.pem -pubout -out signer.pub.pem
 
-devproof build ./catalog/gb200-nvl72-1.3.10 \
-  --to oci-layout://./signed --tag gb200-1.3.10 \
-  --sign --key signer.pem
+# --quiet prints the canonical digest reference, which is what a policy
+# should be pointed at. A tag is a label that can be moved later.
+REF=$(devproof build ./catalog/gb200-nvl72-1.3.10 \
+  --to oci-layout://./signed --sign --key signer.pem --quiet)
+echo "$REF"
 ```
 
 ```console
-evidence:        sha256:c51ac1f90d60686f6626aead1eb5abc9310bc4784d522dc577926b6d03a440e7
-attester:        devproof.thingz.io/key/v1
-storage:         referrers
+oci-layout://./signed@sha256:e48f5b2458b1663476770a590e695afa708c19fa02b1458e31d937a4db27dbb6
 ```
 
-The evidence is attached to the subject, not folded into it. The catalog's
+The evidence is attached to the subject, not folded into it, so the catalog's
 digest is the same as in step 1 — signing did not change what was signed.
 
 Now require that signature. Write the policy with the key's own identity:
@@ -170,7 +196,7 @@ Now require that signature. Write the policy with the key's own identity:
 ```bash
 # The signer identity is reported by inspect; a policy names it rather than
 # naming a file, so the same policy works wherever the key is kept.
-KEYID=$(devproof inspect oci-layout://./signed:gb200-1.3.10 \
+KEYID=$(devproof inspect "$REF" \
   --evidence --key signer.pub.pem --format json |
   python3 -c 'import sys,json; print(json.load(sys.stdin)["result"]["subject"]["evidence"][0]["identities"][0].removeprefix("key "))')
 
@@ -180,6 +206,10 @@ kind: VerificationPolicy
 metadata:
   name: qualified-stack
 spec:
+  subject:
+    # A tag can be repointed at other content after you have decided to trust
+    # it. Requiring a digest means the thing verified is the thing named.
+    requireDigestReference: true
   provenance:
     required: true
   signatures:
@@ -188,7 +218,7 @@ spec:
       - keyId: "${KEYID}"
 EOF
 
-devproof verify oci-layout://./signed:gb200-1.3.10 --policy trust.yaml --key signer.pub.pem
+devproof verify "$REF" --policy trust.yaml --key signer.pub.pem
 ```
 
 ```console
@@ -196,16 +226,29 @@ integrity:       pass
 trust:           pass
 semantics:       not-evaluated
 policy:          qualified-stack
-policy digest:   sha256:157eb40e2c042edaf074dd5214fc8fda2f7896bc0780593741278de64d33b501
-signed by:       key 339f0eef1a73b63f313380efae736d9a3c303fdc50c97e84f030cdfb1db4cfae
+policy digest:   sha256:4751811269beafeddbc464a6b1deb7ff94a0e95f514774b79f5916a254b85456
+signed by:       key e793ffb4fce17225e10b06f37125d91ed9e3c3e595a316af6bbd8b15115630dc
 ```
 
 Your key identity and policy digest will differ — you generated the key a
 moment ago. The catalog's own digests will not.
 
-`trust: pass`, and the report names the policy that produced it and the key it
-believed. Point it at the unsigned bundle from step 1 instead and it refuses,
-writing nothing.
+The report names the policy that produced the answer and the key it believed.
+`semantics: not-evaluated` is sitting there in the middle of a passing result,
+and it is the honest part: nothing checked whether these are the right
+versions.
+
+The digest requirement is not decoration. Point the same policy at the tag and
+it refuses before fetching anything:
+
+```bash
+devproof build ./catalog/gb200-nvl72-1.3.10 --to oci-layout://./signed --tag gb200-1.3.10 --quiet
+devproof verify oci-layout://./signed:gb200-1.3.10 --policy trust.yaml --key signer.pub.pem
+```
+
+```console
+error: a digest reference is required, but a tag was supplied
+```
 
 ---
 
@@ -230,11 +273,12 @@ cp gpu.yaml.orig "$GPU" && rm gpu.yaml.orig
 ```
 
 ```console
-oci-layout://./altered@sha256:9ef35c18b032e595268a7abe00ff812fe797ab17977d0d34664f95427a397e19
+oci-layout://./altered@sha256:5e5477d508f5ad7c7027b582570586c7609092724140aa600b7c65695371940c
 ```
 
-Fourteen characters in one file, in a catalog of thirty-seven, and the stack's
-name went from `sha256:65ab2728…` to `sha256:9ef35c18…`.
+Fourteen characters in one file, in a catalog of forty-seven components, and
+the stack's name went from `sha256:e48f5b24…` to `sha256:5e5477d5…`. Restore
+the file, rebuild, and `e48f5b24…` comes back.
 
 That is the property worth taking away. The per-file inventory — every path,
 mode, size and content digest — is folded into the subject digest, and the
@@ -255,7 +299,7 @@ not a preference: a transport that has not promised to stay local is rejected
 when it is selected, before a reference is resolved or a byte is fetched.
 
 ```bash
-devproof verify oci-layout://./signed:gb200-1.3.10 \
+devproof verify "$REF" \
   --policy trust.yaml --key signer.pub.pem --offline --trust-root signer.pub.pem
 ```
 
@@ -280,7 +324,7 @@ error: this client is offline, and "oci" references need the network
 
 ## What we saw
 
-- **A version list became an artifact.** Thirty-seven components, one digest,
+- **A version list became an artifact.** Forty-seven components, one digest,
   and a label anyone could retype is no longer what identifies the stack.
 - **Two rack generations diffed at component granularity.** Real adds, removes
   and modifications — and the components that did not change stayed silent.
@@ -291,9 +335,18 @@ error: this client is offline, and "oci" references need the network
 - **An answer reached with the network refused**, which is the condition the
   rack is actually in.
 
-What this does not do is verify firmware. The packages are signed by the people
-who built them, and that is the right place for it. This verifies the claim
-about which packages belong together — the part that was, until now, a page.
+And what it does not show, restated because a passing result is persuasive:
+
+| Proved | Not proved |
+| --- | --- |
+| These exact catalog bytes are unchanged | Firmware package bytes are unchanged |
+| A key you configured signed them | That NVIDIA signed or approved anything |
+| Which components differ between catalogs | That either catalog is complete or correct |
+| Verification with no network | Device secure boot, CoRIM or SPDM attestation |
+
+The packages themselves are signed by the people who built them, and that is
+the right place for it. This verifies a claim about which versions belong
+together — the part that was, until now, a page.
 
 ## Regenerating the catalog
 

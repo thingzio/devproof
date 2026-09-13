@@ -118,14 +118,32 @@ func TestWalkthroughRuns(t *testing.T) {
 		t.Error("two different rack catalogs compared as identical")
 	}
 
-	// Step 3: the signed catalog satisfies the policy the walkthrough wrote.
-	output, err := run("verify", "oci-layout://./signed:gb200-1.3.10",
+	// Step 3: the signed catalog satisfies the policy, by digest.
+	signed := subjectOf(t, run, "oci-layout://./signed:gb200-1.3.10")
+	output, err := run("verify", "oci-layout://./signed@"+signed,
 		"--policy", "trust.yaml", "--key", "signer.pub.pem")
 	if err != nil {
 		t.Fatalf("verifying the signed catalog: %v\n%s", err, output)
 	}
 	if !strings.Contains(output, "trust:           pass") {
 		t.Errorf("the signed catalog did not establish trust:\n%s", output)
+	}
+	// And the report says plainly that nothing judged the contents, which is
+	// the claim the document is careful about.
+	if !strings.Contains(output, "semantics:       not-evaluated") {
+		t.Errorf("a passing result did not report semantics as not-evaluated:\n%s", output)
+	}
+
+	// The same policy must refuse the same artifact reached by tag. A tag can
+	// be repointed after somebody decides to trust it, which is the whole
+	// reason requireDigestReference exists.
+	output, err = run("verify", "oci-layout://./signed:gb200-1.3.10",
+		"--policy", "trust.yaml", "--key", "signer.pub.pem")
+	if err == nil {
+		t.Error("a policy requiring a digest reference accepted a tag")
+	}
+	if !strings.Contains(output, "digest reference") {
+		t.Errorf("the refusal does not mention the digest requirement: %s", output)
 	}
 
 	// Step 5: offline refuses a network reference rather than attempting it.

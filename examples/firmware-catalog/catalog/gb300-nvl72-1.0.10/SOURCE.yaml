@@ -2,4 +2,3 @@
 system: "NVIDIA DGX GB300 NVL72"
 release: "1.0.10"
 url: "https://docs.nvidia.com/dgx/dgxgb300nvl72-release-notes/package-contents.html"
-retrieved: "2026-09-13"
