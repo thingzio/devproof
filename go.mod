@@ -1,6 +1,6 @@
 module github.com/thingzio/devproof
 
-go 1.27.0
+go 1.27.1
 
 require (
 	github.com/distribution/reference v0.6.0
