@@ -29,6 +29,15 @@ outputs:
   gitleaks:
     description: gitleaks version
     value: ${{ steps.read.outputs.gitleaks }}
+  zot:
+    description: zot registry image tag
+    value: ${{ steps.read.outputs.zot }}
+  registry:
+    description: distribution registry image tag, with the referrers API
+    value: ${{ steps.read.outputs.registry }}
+  registry_no_referrers:
+    description: distribution registry image tag from before the referrers API
+    value: ${{ steps.read.outputs.registry_no_referrers }}
 
 runs:
   using: composite
@@ -50,6 +59,7 @@ runs:
           fi
           echo "${key}=${value}" >> "$GITHUB_OUTPUT"
         }
-        for key in golangci_lint govulncheck actionlint goreleaser syft grype yamllint gitleaks; do
+        for key in golangci_lint govulncheck actionlint goreleaser syft grype \
+                   yamllint gitleaks zot registry registry_no_referrers; do
           emit "${key}"
         done

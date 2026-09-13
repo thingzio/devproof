@@ -40,14 +40,18 @@ security_tools:
   # renovate: datasource=github-releases depName=gitleaks/gitleaks
   gitleaks: 'v8.30.1'
 
-# Integration-test infrastructure. Pinned by digest where the test asserts
-# registry behavior: a moving tag would silently change what "a conformant
-# registry" means between runs.
+# Integration-test infrastructure. A moving tag would silently change what "a
+# conformant registry" means between runs.
 test_infra:
-  # renovate: datasource=docker depName=registry
-  registry: '3.0.0'
   # renovate: datasource=docker depName=ghcr.io/project-zot/zot
   zot: 'v2.1.9'
+  # renovate: datasource=docker depName=registry
+  registry: '3.0.0'
+  # A registry from before the referrers API, which is the entire point of it.
+  # Held deliberately: the value of this cell is the absence of the feature, so
+  # an upgrade would silently delete the only test of the fallback tag path
+  # (DP-028).
+  registry_no_referrers: '2.8.3'
 
 # External specification versions the format is written against. These are
 # protocol pins, not dependency pins: changing one is a format compatibility

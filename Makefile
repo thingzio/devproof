@@ -261,12 +261,16 @@ scan: sbom $(GRYPE_STAMP) ## Scan the SBOM for vulnerabilities
 	grype sbom:sbom.json --fail-on medium
 
 .PHONY: cover-check
-cover-check: cover ## Fail if coverage falls below the threshold
+cover-check: cover ## Fail if coverage falls below the repository or package floors
 	@total="$$(go tool cover -func=$(COVERAGE_FILE) | awk '/^total:/ {print $$3}' | tr -d '%')"; \
 	echo "coverage $${total}% (threshold $(COVERAGE_THRESHOLD)%)"; \
 	awk -v got="$${total}" -v want="$(COVERAGE_THRESHOLD)" \
 	  'BEGIN { exit (got + 0 >= want + 0) ? 0 : 1 }' \
 	  || { echo "coverage $${total}% is below the $(COVERAGE_THRESHOLD)% threshold"; exit 1; }
+	# A repository-wide floor can be met by testing the easy packages, and the
+	# packages where a gap is dangerous are not the ones where coverage is
+	# cheap.
+	python3 tools/coverage-floors $(COVERAGE_FILE)
 
 ##@ Gates
 

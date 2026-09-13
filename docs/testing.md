@@ -298,6 +298,21 @@ of this check that helps runs before the push.
 `make tidy` calls it, so a dependency cannot enter the binary without its
 license being recorded.
 
+## Coverage floors
+
+`make cover-check` enforces a repository-wide floor from `.versions.yaml` and a
+per-package floor from `tools/coverage-floors`.
+
+A single repository-wide number can be met by testing the easy packages, and
+the packages where a gap is dangerous are not the ones where coverage is cheap:
+an untested branch in expansion writes a file somewhere it should not, and an
+untested branch in policy evaluation reports `pass`. Each package floor is set
+just under that package's current coverage so it ratchets. Raise one when
+coverage improves; never lower one to make a red build green.
+
+A floor naming a package that is absent from the profile fails, because a floor
+nobody is enforcing looks exactly like a floor being met.
+
 ## Live registry tests
 
 The registry tests in `internal/oci` drive an in-process handler written in
@@ -313,12 +328,16 @@ docker run --rm -p 5000:5000 ghcr.io/project-zot/zot-linux-amd64:latest
 DEVPROOF_TEST_REGISTRY=localhost:5000 go test -tags registry ./internal/oci/
 ```
 
-CI runs it against two, chosen for a feature one has and the other does not:
-zot implements the referrers API, and distribution 2.8.3 predates it so the
-fallback tag answers instead. That pair found a real defect — the evidence
-storage mode was reported as `referrers` against a registry whose referrers
-endpoint returns 404, because the client library falls back on its own and
-returns success, which made `evidence.allowTagFallback` unreachable.
+CI runs it against three, pinned in `.versions.yaml`: zot and distribution 3
+implement the referrers API independently, and distribution 2.8.3 predates it
+so the fallback tag answers instead. That last cell is held deliberately and
+excluded from automated bumps — the value of it is the absence of the feature,
+so an upgrade would silently delete the only test of the fallback path.
+
+The pair found a real defect: the evidence storage mode was reported as
+`referrers` against a registry whose referrers endpoint returns 404, because
+the client library falls back on its own and returns success, which made
+`evidence.allowTagFallback` unreachable.
 
 Asking for the tag without supplying a registry fails rather than skips:
 somebody who typed `-tags registry` meant to run it.
@@ -342,6 +361,11 @@ coverage floor
 
 Plus, on the tagged commit only: the fuzz smoke corpus and the independent
 conformance reader.
+
+Fuzzing runs short on every push and long on a weekly schedule. Thirty seconds
+per target re-exercises the seed corpus and catches a parser somebody just
+broke; finding a new input takes longer than anyone will wait for a pull
+request.
 
 `qualify-check` rather than `qualify`. The gate a developer runs tidies,
 regenerates notices, and formats, which is what you want before a commit and

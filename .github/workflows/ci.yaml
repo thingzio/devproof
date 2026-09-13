@@ -5,6 +5,12 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  # A weekly run, for the jobs whose value is time rather than coverage: a
+  # fuzz campaign that finds a new input needs longer than anyone will wait for
+  # a pull request, and the registry images move under their tags whether or
+  # not anybody pushed.
+  schedule:
+    - cron: '17 4 * * 1'
 
 # Neither a force-pushed pull request nor a run of pushes to main should leave
 # older runs burning runners; the newest commit is the only one whose result
@@ -229,8 +235,14 @@ jobs:
         with:
           go-version-file: .go-version
           check-latest: true
+      # Short on every push, long on a schedule. A thirty-second run per target
+      # re-exercises the seed corpus and catches a parser somebody just broke;
+      # finding a new input takes longer than anyone will wait for a pull
+      # request, so the campaign runs on a timer instead.
       - name: fuzz smoke
         run: make fuzz
+        env:
+          FUZZTIME: ${{ github.event_name == 'schedule' && '10m' || '30s' }}
       # A crash leaves its input under testdata/fuzz. Keeping it is what turns
       # one unlucky CI run into a permanent regression test.
       - name: upload any crashers
@@ -253,17 +265,43 @@ jobs:
   # "referrers" against a registry whose referrers endpoint returns 404,
   # because oras-go falls back on its own and returns success.
   #
-  #   zot                  implements the referrers API
-  #   distribution 2.8.3   predates it, so the fallback tag answers
+  #   zot                          implements the referrers API
+  #   distribution 3                implements it too, independently
+  #   distribution 2.8.3            predates it, so the fallback tag answers
+  #
+  # Images are pinned in .versions.yaml, which had held a registry pin nothing
+  # used -- documentation of something that did not happen, which is the drift
+  # that file exists to prevent.
+  registry-versions:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      images: ${{ steps.build.outputs.images }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - id: read
+        uses: ./.github/actions/load-versions
+      - id: build
+        run: |
+          printf 'images=%s\n' "$(jq -c -n \
+            --arg zot "${{ steps.read.outputs.zot }}" \
+            --arg registry "${{ steps.read.outputs.registry }}" \
+            --arg legacy "${{ steps.read.outputs.registry_no_referrers }}" \
+            '[{name:"zot", image:("ghcr.io/project-zot/zot-linux-amd64:" + $zot)},
+              {name:"distribution", image:("registry:" + $registry)},
+              {name:"distribution-no-referrers", image:("registry:" + $legacy)}]')" \
+            >> "$GITHUB_OUTPUT"
+
   registry:
+    needs: [registry-versions]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - {name: zot, image: "ghcr.io/project-zot/zot-linux-amd64:v2.1.10"}
-          - {name: distribution, image: "registry:2.8.3"}
+        include: ${{ fromJSON(needs.registry-versions.outputs.images) }}
     services:
       registry:
         image: ${{ matrix.image }}
