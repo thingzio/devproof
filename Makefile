@@ -207,9 +207,24 @@ vet: ## Run go vet
 #                 when sigstore-go drops the dependency.
 VULN_ALLOWLIST := GO-2026-5932
 
+# When each acceptance stops being accepted.
+#
+# An acceptance with no end date is a decision nobody revisits: the reason it
+# was safe -- an unreachable package init, a dependency about to be dropped --
+# stops being checked the moment it is written down, and the entry outlives the
+# analysis. Past this date the build fails until somebody re-reads the finding
+# and either removes it or moves the date forward deliberately.
+VULN_ALLOWLIST_REVIEW := 2026-12-01
+
 .PHONY: vuln
 vuln: $(GOVULNCHECK_STAMP) ## Scan for known vulnerabilities
-	@echo "accepted, unfixable findings: $(VULN_ALLOWLIST)"
+	@echo "accepted, unfixable findings: $(VULN_ALLOWLIST) (review by $(VULN_ALLOWLIST_REVIEW))"
+	@today="$$(date -u +%Y-%m-%d)"; \
+	  if [ "$$today" \> "$(VULN_ALLOWLIST_REVIEW)" ]; then \
+	    echo "the vulnerability allowlist expired on $(VULN_ALLOWLIST_REVIEW);"; \
+	    echo "re-read each accepted finding, then remove it or move the date"; \
+	    exit 1; \
+	  fi
 	@report="$$(govulncheck ./... 2>&1 || true)"; \
 	  found="$$(printf '%s\n' "$$report" | sed -n 's/^Vulnerability #[0-9]*: \(GO-[0-9-]*\).*/\1/p' | sort -u)"; \
 	  unexpected=""; \

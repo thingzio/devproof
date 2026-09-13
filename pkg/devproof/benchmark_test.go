@@ -23,7 +23,9 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/thingzio/devproof/pkg/devproof"
 )
@@ -174,9 +176,62 @@ func BenchmarkExpand(b *testing.B) {
 	}
 }
 
-// BenchmarkPeakMemory records the high-water mark rather than the total, which
-// is the number that decides whether a default limit is survivable on a small
-// CI runner.
+// heapSampler tracks the highest live heap seen while an operation runs.
+//
+// Sampled in the background rather than read afterwards. A reading taken once
+// the operation has returned reports what is still live at that moment, which
+// is close to zero for a streaming implementation and close to zero for a
+// buffering one that has already released its buffer -- the number the metric
+// is named for only exists while the work is in flight.
+type heapSampler struct {
+	peak atomic.Uint64
+	stop chan struct{}
+	done chan struct{}
+}
+
+// sampleHeap starts sampling until the returned stop function is called.
+//
+// The interval is a compromise: ReadMemStats stops the world, so sampling too
+// often distorts the thing being measured, and sampling too rarely misses the
+// spike. A build or expand here runs for tens of milliseconds at least.
+func sampleHeap() *heapSampler {
+	sampler := &heapSampler{stop: make(chan struct{}), done: make(chan struct{})}
+	go func() {
+		defer close(sampler.done)
+		ticker := time.NewTicker(time.Millisecond)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-sampler.stop:
+				return
+			case <-ticker.C:
+				var stats runtime.MemStats
+				runtime.ReadMemStats(&stats)
+				for {
+					current := sampler.peak.Load()
+					if stats.HeapAlloc <= current {
+						break
+					}
+					if sampler.peak.CompareAndSwap(current, stats.HeapAlloc) {
+						break
+					}
+				}
+			}
+		}
+	}()
+	return sampler
+}
+
+func (s *heapSampler) close() uint64 {
+	close(s.stop)
+	<-s.done
+	return s.peak.Load()
+}
+
+// BenchmarkPeakMemory records the high-water live heap during the operation,
+// which is the number that decides whether a default limit is survivable on a
+// small CI runner.
 func BenchmarkPeakMemory(b *testing.B) {
 	for _, shape := range shapes {
 		b.Run(shape.name, func(b *testing.B) {
@@ -187,7 +242,7 @@ func BenchmarkPeakMemory(b *testing.B) {
 			b.ReportAllocs()
 			b.ResetTimer()
 
-			var peak uint64
+			sampler := sampleHeap()
 			for i := 0; b.Loop(); i++ {
 				dest := filepath.Join(b.TempDir(), fmt.Sprintf("layout%d", i))
 				built, err := client.Build(ctx, devproof.BuildRequest{
@@ -203,12 +258,8 @@ func BenchmarkPeakMemory(b *testing.B) {
 				}); err != nil {
 					b.Fatalf("expand: %v", err)
 				}
-
-				var stats runtime.MemStats
-				runtime.ReadMemStats(&stats)
-				peak = max(peak, stats.HeapAlloc)
 			}
-			b.ReportMetric(float64(peak)/(1<<20), "peakHeapMiB")
+			b.ReportMetric(float64(sampler.close())/(1<<20), "peakHeapMiB")
 		})
 	}
 }
