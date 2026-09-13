@@ -251,7 +251,7 @@ specification that turned out to be wrong.
 ```go
 import "github.com/thingzio/devproof/pkg/conformance"
 
-report, err := conformance.VerifyLayout("./artifact", "v1")
+report, err := conformance.VerifyLayout("./artifact", "v1", conformance.LevelCanonical)
 ```
 
 ## Documentation

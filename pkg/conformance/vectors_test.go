@@ -20,9 +20,13 @@ import (
 	"bytes"
 	"compress/flate"
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"hash/crc32"
+	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -183,24 +187,79 @@ func putUint32(dst []byte, v uint32) {
 	dst[3] = byte(v >> 24)
 }
 
-// verifyLayer runs a synthetic layer through the public entry point.
+// configFor builds the config blob that describes a synthetic archive.
 //
-// The config it builds is deliberately not consistent with the layer: every
-// layer rule is checked before the inventory is compared, so a conforming
-// layer reaches the tree-digest comparison and fails there. That makes the
-// base case a control -- "tree digest" means every header rule passed -- and
-// each vector's own message the thing under test.
-func verifyLayer(t *testing.T, layer []byte) error {
-	t.Helper()
+// The tree digest is recomputed here from the specification rather than taken
+// from the package under test, so a conforming vector verifies end to end and
+// the control means "every rule passed" rather than "the read got far enough".
+func configFor(entries []entry) string {
+	type record struct {
+		path   string
+		mode   uint32
+		size   int64
+		digest [32]byte
+	}
 
-	// Members are in UTF-16 code-unit order: the documents are checked for
-	// RFC 8785 canonicality before anything else is read, so a fixture written
-	// in a readable order would fail every vector for the same wrong reason.
-	config := `{"fileCount":0,"files":[],"format":"devproof-bundle-v1",` +
-		`"schemaVersion":1,"totalSize":0,` +
-		`"treeDigest":"sha256:` + strings.Repeat("0", 64) + `"}`
+	var records []record
+	for _, e := range entries {
+		if e.typeflag != '0' {
+			continue
+		}
+		records = append(records, record{
+			path: e.name, mode: uint32(e.mode), size: int64(len(e.content)),
+			digest: sha256.Sum256([]byte(e.content)),
+		})
+	}
+	slices.SortFunc(records, func(a, b record) int { return strings.Compare(a.path, b.path) })
 
-	manifest := fmt.Sprintf(`{`+
+	h := sha256.New()
+	h.Write([]byte("devproof-tree-v1\x00"))
+	var scratch [8]byte
+	binary.BigEndian.PutUint64(scratch[:], uint64(len(records)))
+	h.Write(scratch[:])
+
+	var files []string
+	var total int64
+	for _, r := range records {
+		binary.BigEndian.PutUint32(scratch[:4], uint32(len(r.path)))
+		h.Write(scratch[:4])
+		h.Write([]byte(r.path))
+		binary.BigEndian.PutUint32(scratch[:4], r.mode)
+		h.Write(scratch[:4])
+		binary.BigEndian.PutUint64(scratch[:], uint64(r.size))
+		h.Write(scratch[:])
+		h.Write(r.digest[:])
+
+		total += r.size
+		files = append(files, fmt.Sprintf(
+			`{"digest":"sha256:%x","mode":%d,"path":%s,"size":%d}`,
+			r.digest, r.mode, jsonString(r.path), r.size))
+	}
+
+	return fmt.Sprintf(
+		`{"fileCount":%d,"files":[%s],"format":"devproof-bundle-v1",`+
+			`"schemaVersion":1,"totalSize":%d,"treeDigest":"sha256:%x"}`,
+		len(records), strings.Join(files, ","), total, h.Sum(nil))
+}
+
+// jsonString encodes a path as a JSON string without HTML escaping.
+//
+// fmt's %q is Go syntax, not JSON: it spells a bell with an escape no JSON
+// parser accepts. encoding/json escapes the angle brackets and the ampersand
+// by default, which is valid JSON and not what a canonicalizer emits.
+func jsonString(value string) string {
+	var out bytes.Buffer
+	encoder := json.NewEncoder(&out)
+	encoder.SetEscapeHTML(false)
+	if err := encoder.Encode(value); err != nil {
+		panic(err)
+	}
+	return strings.TrimRight(out.String(), "\n")
+}
+
+// manifestFor wires a config and a layer into a canonical manifest.
+func manifestFor(config string, layer []byte) string {
+	return fmt.Sprintf(`{`+
 		`"artifactType":"application/vnd.thingz.devproof.bundle.v1",`+
 		`"config":{"digest":"%s",`+
 		`"mediaType":"application/vnd.thingz.devproof.config.v1+json","size":%d},`+
@@ -209,8 +268,31 @@ func verifyLayer(t *testing.T, layer []byte) error {
 		`"mediaType":"application/vnd.oci.image.manifest.v1+json",`+
 		`"schemaVersion":2}`,
 		digestOf([]byte(config)), len(config), digestOf(layer), len(layer))
+}
 
-	_, err := conformance.VerifyManifest([]byte(manifest), func(digest string) ([]byte, error) {
+// verifyEntries runs a synthetic archive through the public entry point.
+func verifyEntries(t *testing.T, entries []entry, level conformance.Level) (*conformance.Report, error) {
+	t.Helper()
+
+	return verifyLayerBytes(t, entries, compress(t, archive(entries)), level)
+}
+
+// verifyLayerBytes is the same with the compressed layer supplied, which is how
+// a vector expresses damage to the container or the framing rather than to an
+// entry.
+func verifyLayerBytes(
+	t *testing.T,
+	entries []entry,
+	layer []byte,
+	level conformance.Level,
+) (*conformance.Report, error) {
+
+	t.Helper()
+
+	config := configFor(entries)
+	manifest := manifestFor(config, layer)
+
+	return conformance.VerifyManifest([]byte(manifest), func(digest string) ([]byte, error) {
 		switch digest {
 		case digestOf([]byte(config)):
 			return []byte(config), nil
@@ -218,8 +300,7 @@ func verifyLayer(t *testing.T, layer []byte) error {
 			return layer, nil
 		}
 		return nil, fmt.Errorf("no blob %s", digest)
-	})
-	return err
+	}, level)
 }
 
 func digestOf(data []byte) string {
@@ -242,12 +323,12 @@ func conformingEntries() []entry {
 func TestConformingSyntheticArchiveReachesTheInventory(t *testing.T) {
 	t.Parallel()
 
-	err := verifyLayer(t, compress(t, archive(conformingEntries())))
-	if err == nil {
-		t.Fatal("a layer that does not match its config verified")
+	report, err := verifyEntries(t, conformingEntries(), conformance.LevelCanonical)
+	if err != nil {
+		t.Fatalf("a conforming synthetic archive was rejected: %v", err)
 	}
-	if !strings.Contains(err.Error(), "the config declares") {
-		t.Fatalf("the synthetic archive failed a header rule rather than the inventory: %v", err)
+	if len(report.Deviations) != 0 {
+		t.Errorf("a conforming archive reported deviations: %v", report.Deviations)
 	}
 }
 
@@ -404,7 +485,7 @@ func TestNonConformingArchivesAreRejected(t *testing.T) {
 			name: "a control character",
 			entries: func() []entry {
 				e := conformingEntries()
-				e[1].name = "a/b\x07.txt"
+				e[1].name = "a/b\x7f.txt"
 				return e
 			},
 			want: "control character",
@@ -423,7 +504,7 @@ func TestNonConformingArchivesAreRejected(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			err := verifyLayer(t, compress(t, archive(tc.entries())))
+			_, err := verifyEntries(t, tc.entries(), conformance.LevelCanonical)
 			if err == nil {
 				t.Fatal("a non-conforming archive verified")
 			}
@@ -469,7 +550,8 @@ func TestArchiveFramingIsChecked(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			err := verifyLayer(t, compress(t, tc.build()))
+			_, err := verifyLayerBytes(t, conformingEntries(),
+				compress(t, tc.build()), conformance.LevelCanonical)
 			if err == nil {
 				t.Fatal("a malformed archive verified")
 			}
@@ -504,7 +586,7 @@ func TestGzipHeaderIsFrozen(t *testing.T) {
 			layer := compress(t, archive(conformingEntries()))
 			tc.edit(layer)
 
-			err := verifyLayer(t, layer)
+			_, err := verifyLayerBytes(t, conformingEntries(), layer, conformance.LevelCanonical)
 			if err == nil {
 				t.Fatal("a layer with a non-frozen gzip header verified")
 			}
@@ -580,5 +662,100 @@ func TestCanonicalJSONIsAccepted(t *testing.T) {
 				t.Errorf("canonical JSON %s was rejected: %v", doc, err)
 			}
 		})
+	}
+}
+
+// TestStructuralLevelToleratesAndRecords covers the level split.
+//
+// Conflating the levels is how an implementation claims more than it checked.
+// A structural pass answers "is this intact and safe to expand"; a GNU header
+// or a user name is not that question, and a reader that failed on one would
+// be useless for reading somebody else's artifact. What it must not do is stay
+// quiet about them.
+func TestStructuralLevelToleratesAndRecords(t *testing.T) {
+	t.Parallel()
+
+	entries := conformingEntries()
+	entries[1].mutate = func(b *block) {
+		b.setString(265, 32, "builder")
+		b.setOctal(108, 8, 1000)
+		b.seal()
+	}
+
+	if _, err := verifyEntries(t, entries, conformance.LevelCanonical); err == nil {
+		t.Error("the canonical level accepted a user name")
+	} else if !strings.Contains(err.Error(), "uname") {
+		t.Errorf("the canonical level failed for another reason: %v", err)
+	}
+
+	report, err := verifyEntries(t, entries, conformance.LevelStructure)
+	if err != nil {
+		t.Fatalf("the structural level refused a readable archive: %v", err)
+	}
+	if len(report.Deviations) != 2 {
+		t.Errorf("deviations = %v, want the user name and the owner", report.Deviations)
+	}
+	if report.Level != conformance.LevelStructure {
+		t.Errorf("report level = %s", report.Level)
+	}
+}
+
+// TestStructuralLevelStillRefusesUnsafePaths draws the other half of the line.
+//
+// A path that escapes the destination is not a spelling difference. Expanding
+// it is the harm, so it fails at every level.
+func TestStructuralLevelStillRefusesUnsafePaths(t *testing.T) {
+	t.Parallel()
+
+	for _, name := range []string{"../escape.txt", "/absolute.txt", "a//b.txt"} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			entries := conformingEntries()
+			entries[1].name = name
+
+			if _, err := verifyEntries(t, entries, conformance.LevelStructure); err == nil {
+				t.Fatal("an unsafe path was accepted at the structural level")
+			}
+		})
+	}
+}
+
+// TestUnknownLevelIsRefused keeps byte conformance from being claimed by a
+// function that does not check it.
+func TestUnknownLevelIsRefused(t *testing.T) {
+	t.Parallel()
+
+	for _, level := range []conformance.Level{0, conformance.LevelBytes, 99} {
+		t.Run(level.String(), func(t *testing.T) {
+			t.Parallel()
+
+			if _, err := verifyEntries(t, conformingEntries(), level); err == nil {
+				t.Error("an artifact was checked at a level nothing implements")
+			}
+		})
+	}
+}
+
+// TestPublishedVectorsVerify closes the loop on the byte vectors.
+//
+// The vectors are what another implementation compares its output against, so
+// a vector that does not itself conform would propagate the error rather than
+// catch it. Reading them back through this package checks that the published
+// manifest, config, and layer describe one artifact, that the published subject
+// and tree digests are the ones that artifact hashes to, and that the
+// uncompressed layer is what the compressed one holds.
+func TestPublishedVectorsVerify(t *testing.T) {
+	t.Parallel()
+
+	report, err := conformance.VerifyVectors(os.DirFS("../../vectors/format/v1"))
+	if err != nil {
+		t.Fatalf("the published vectors do not verify: %v", err)
+	}
+	if report.Level != conformance.LevelBytes {
+		t.Errorf("report level = %s, want %s", report.Level, conformance.LevelBytes)
+	}
+	if report.FileCount == 0 {
+		t.Error("the vector artifact holds no files")
 	}
 }

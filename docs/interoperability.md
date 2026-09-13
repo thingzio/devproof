@@ -157,16 +157,38 @@ cells rather than four.
 
 ## Independent verification
 
-`conformance` is a second reader built only from the Go standard library and
-the format specification, sharing no code with the writer (DP-034). It is the
-strongest interoperability evidence here, because it does not depend on any
-other tool agreeing with us — it checks the artifact against the document that
-describes it.
+`conformance` is a second reader built only from the format specification,
+sharing no code with the writer (DP-034). It is the strongest interoperability
+evidence here, because it does not depend on any other tool agreeing with us —
+it checks the artifact against the document that describes it.
 
 ```go
-report, err := conformance.VerifyLayout("./layout", "v1")
+report, err := conformance.VerifyLayout("./layout", "v1", conformance.LevelCanonical)
 ```
 
 It recomputes the tree digest from the layer bytes rather than reading it from
 the config, so a config that agreed with itself but not with its payload is
-caught.
+caught. It reads raw tar blocks rather than using `archive/tar`, which accepts
+GNU and base-256 encodings and silently joins the USTAR prefix field onto the
+name — every one of those is a deviation this reader exists to find.
+
+### Conformance levels
+
+Three questions, kept separate so an implementation cannot claim more than it
+checked:
+
+| Level | Question | Checks |
+| --- | --- | --- |
+| `LevelStructure` | is it intact and safe to expand? | every digest recomputed, the inventory compared with what the layer held, no path escaping the destination |
+| `LevelCanonical` | are these the only bytes for this tree? | entry order, the fixed header fields, the extended-header restriction, the frozen gzip header, RFC 8785 member order, the portable path rules |
+| `LevelBytes` | does this writer reproduce the published vectors? | the byte vectors in [vectors/](../vectors) |
+
+A deviation found above the requested level is recorded in
+`Report.Deviations` rather than discarded, so a structural pass still reports
+what it tolerated.
+
+`LevelBytes` is a property of an implementation, not of an artifact: it is
+checked by building the documented input tree and comparing the result with
+`vectors/format/v1`. `conformance.VerifyVectors` runs that comparison for a
+directory of vector files, which is how another implementation checks its own
+output.

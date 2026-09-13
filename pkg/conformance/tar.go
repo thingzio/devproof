@@ -100,7 +100,7 @@ type tarEntry struct {
 // GNU and base-256 encodings, transparently joins the USTAR prefix field onto
 // the name, and hides how a value was spelled — and every one of those
 // kindnesses conceals exactly the deviation this package exists to find.
-func readTar(data []byte) ([]tarEntry, error) {
+func readTar(data []byte, found *findings) ([]tarEntry, error) {
 	if len(data)%blockSize != 0 {
 		return nil, fmt.Errorf("the archive is %d bytes, which is not a whole number of %d-byte blocks",
 			len(data), blockSize)
@@ -126,7 +126,7 @@ func readTar(data []byte) ([]tarEntry, error) {
 		}
 		offset += blockSize
 
-		header, err := parseHeader(block)
+		header, err := parseHeader(block, found)
 		if err != nil {
 			return nil, err
 		}
@@ -141,7 +141,7 @@ func readTar(data []byte) ([]tarEntry, error) {
 			if havePath {
 				return nil, errors.New("two extended headers precede one entry")
 			}
-			pending, err = extendedPath(payload)
+			pending, err = extendedPath(payload, found)
 			if err != nil {
 				return nil, err
 			}
@@ -206,17 +206,21 @@ func readPayload(data []byte, offset int, size int64) ([]byte, int, error) {
 }
 
 // parseHeader reads and checks one 512-byte header block.
-func parseHeader(block []byte) (tarEntry, error) {
+func parseHeader(block []byte, found *findings) (tarEntry, error) {
 	var entry tarEntry
 
 	if err := verifyChecksum(block); err != nil {
 		return entry, err
 	}
 	if got := block[offMagic : offMagic+sizeMagic]; !bytes.Equal(got, ustarMagic) {
-		return entry, fmt.Errorf("header magic is %q, want the POSIX USTAR %q", got, ustarMagic)
+		if err := found.canonical("header magic is %q, want the POSIX USTAR %q", got, ustarMagic); err != nil {
+			return entry, err
+		}
 	}
 	if got := block[offVersion : offVersion+sizeVersion]; !bytes.Equal(got, ustarVersion) {
-		return entry, fmt.Errorf("header version is %q, want %q", got, ustarVersion)
+		if err := found.canonical("header version is %q, want %q", got, ustarVersion); err != nil {
+			return entry, err
+		}
 	}
 
 	name := trimField(block[offName : offName+sizeName])
@@ -224,22 +228,31 @@ func parseHeader(block []byte) (tarEntry, error) {
 
 	// The prefix field is never written: using it means choosing where to split
 	// a path, and two encoders that split differently produce different bytes
-	// for the same tree.
-	if err := requireEmpty(block[offPrefix:offPrefix+sizePrefix], "prefix", name); err != nil {
-		return entry, err
-	}
-	if err := requireEmpty(block[offLinkname:offLinkname+sizeLinkname], "linkname", name); err != nil {
-		return entry, err
-	}
-	if err := requireEmpty(block[offUname:offUname+sizeOwner], "uname", name); err != nil {
-		return entry, err
-	}
-	if err := requireEmpty(block[offGname:offGname+sizeOwner], "gname", name); err != nil {
-		return entry, err
+	// for the same tree. None of these fields changes what the archive holds,
+	// so each is a canonical deviation rather than an unreadable archive.
+	for _, field := range []struct {
+		label  string
+		offset int
+		width  int
+	}{
+		{"prefix", offPrefix, sizePrefix},
+		{"linkname", offLinkname, sizeLinkname},
+		{"uname", offUname, sizeOwner},
+		{"gname", offGname, sizeOwner},
+	} {
+		if trimField(block[field.offset:field.offset+field.width]) == "" {
+			continue
+		}
+		if err := found.canonical("entry %q carries a %s field", name, field.label); err != nil {
+			return entry, err
+		}
 	}
 	for _, b := range block[offPadding : offPadding+sizePadding] {
 		if b != 0 {
-			return entry, fmt.Errorf("entry %q has a non-zero header padding byte", name)
+			if err := found.canonical("entry %q has a non-zero header padding byte", name); err != nil {
+				return entry, err
+			}
+			break
 		}
 	}
 
@@ -259,7 +272,9 @@ func parseHeader(block []byte) (tarEntry, error) {
 			return entry, err
 		}
 		if value != 0 {
-			return entry, fmt.Errorf("entry %q has %s %d, want 0", name, field.label, value)
+			if err := found.canonical("entry %q has %s %d, want 0", name, field.label, value); err != nil {
+				return entry, err
+			}
 		}
 	}
 
@@ -352,9 +367,9 @@ func parseOctal(field []byte, label, name string) (int64, error) {
 // Exactly one record, named path, is legal. Anything else — a size record, a
 // timestamp, a vendor key, or a second copy of path — is a record that changes
 // what the archive means and that a v1 reader has no rule for.
-func extendedPath(payload []byte) (string, error) {
+func extendedPath(payload []byte, found *findings) (string, error) {
 	rest := payload
-	var found string
+	var path string
 
 	for len(rest) > 0 {
 		space := bytes.IndexByte(rest, ' ')
@@ -375,30 +390,30 @@ func extendedPath(payload []byte) (string, error) {
 			return "", errors.New("an extended header record has no key")
 		}
 		if key != "path" {
-			return "", fmt.Errorf("an extended header carries the record %q; v1 emits only path", key)
+			// Ignored for interpretation either way: this reader has no rule
+			// for a record v1 does not emit, and acting on one would let an
+			// archive mean something the specification does not define.
+			if err := found.canonical(
+				"an extended header carries the record %q; v1 emits only path", key); err != nil {
+				return "", err
+			}
+			rest = rest[length:]
+			continue
 		}
-		if found != "" {
+		if path != "" {
 			return "", errors.New("an extended header carries two path records")
 		}
 		if value == "" {
 			return "", errors.New("an extended header carries an empty path")
 		}
-		found = value
+		path = value
 		rest = rest[length:]
 	}
 
-	if found == "" {
+	if path == "" {
 		return "", errors.New("an extended header carries no path record")
 	}
-	return found, nil
-}
-
-// requireEmpty checks that a fixed field holds nothing.
-func requireEmpty(field []byte, label, name string) error {
-	if trimField(field) != "" {
-		return fmt.Errorf("entry %q carries a %s field", name, label)
-	}
-	return nil
+	return path, nil
 }
 
 // trimField reads a NUL-padded string field.

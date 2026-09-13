@@ -345,14 +345,32 @@ func TestGoldenConfig(t *testing.T) {
 	t.Parallel()
 
 	subject, _ := packageFixture(t)
-	golden.Assert(t, "testdata/format/v1/config.json", subject.ConfigBytes)
+	golden.Assert(t, "../../vectors/format/v1/config.json", subject.ConfigBytes)
 }
 
 func TestGoldenManifest(t *testing.T) {
 	t.Parallel()
 
 	subject, _ := packageFixture(t)
-	golden.Assert(t, "testdata/format/v1/manifest.json", subject.ManifestBytes)
+	golden.Assert(t, "../../vectors/format/v1/manifest.json", subject.ManifestBytes)
+}
+
+// TestGoldenLayerIsTheSubjectsLayer keeps the vector set coherent.
+//
+// The published layer used to be the tar encoder's output for a hand-written
+// entry list whose directory set was incomplete, so it was not the blob the
+// published manifest describes -- a second implementation comparing its output
+// against the set would have had to fail one file or the other.
+func TestGoldenLayerIsTheSubjectsLayer(t *testing.T) {
+	t.Parallel()
+
+	subject, layer := packageFixture(t)
+	golden.Assert(t, "../../vectors/format/v1/layer.tar.gz", layer)
+
+	if got := DigestOf(layer); got.String() != subject.LayerDigest.String() {
+		t.Errorf("the packaged layer hashes to %s, and the subject names %s",
+			got, subject.LayerDigest)
+	}
 }
 
 // The subject digest is the bundle's identity. It gets its own fixture so a
@@ -361,5 +379,5 @@ func TestGoldenSubjectDigest(t *testing.T) {
 	t.Parallel()
 
 	subject, _ := packageFixture(t)
-	golden.AssertString(t, "testdata/format/v1/subject-digest.txt", subject.ManifestDigest.String()+"\n")
+	golden.AssertString(t, "../../vectors/format/v1/subject-digest.txt", subject.ManifestDigest.String()+"\n")
 }

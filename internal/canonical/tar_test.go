@@ -496,7 +496,7 @@ func TestTruncateAtRune(t *testing.T) {
 func TestGoldenTar(t *testing.T) {
 	t.Parallel()
 
-	golden.Assert(t, "testdata/format/v1/layer.tar", goldenTar(t))
+	golden.Assert(t, "../../vectors/format/v1/layer.tar", goldenTar(t))
 }
 
 // The compressed layer is what the OCI descriptor covers, so it gets its own
@@ -516,7 +516,7 @@ func TestGoldenLayer(t *testing.T) {
 	if err := w.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
 	}
-	golden.Assert(t, "testdata/format/v1/layer.tar.gz", buf.Bytes())
+	golden.Assert(t, "../../vectors/format/v1/layer.tar.gz", buf.Bytes())
 }
 
 // goldenTar builds the canonical fixture tree: an empty file, binary content,
@@ -524,8 +524,15 @@ func TestGoldenLayer(t *testing.T) {
 func goldenTar(t *testing.T) []byte {
 	t.Helper()
 
-	return writeTar(t,
-		[]string{"app", "app/config", "app/scripts", "café", strings.Repeat("directory/", 12)[:119]},
+	// Every parent of every file, which is what the packager emits. The list
+	// used to name only the deepest nested directory, so the published layer
+	// vector was not the layer the published manifest describes.
+	dirs := []string{"app", "app/config", "app/scripts", "café"}
+	for depth := 1; depth <= 12; depth++ {
+		dirs = append(dirs, strings.TrimSuffix(strings.Repeat("directory/", depth), "/"))
+	}
+
+	return writeTar(t, dirs,
 		[]entry{
 			{"README.md", bundle.ModeFile, "hello world\n"},
 			{"app/config/service.yaml", bundle.ModeFile, "a: 1\n"},

@@ -327,7 +327,7 @@ func TestGoldenTreeRecords(t *testing.T) {
 	if err := WriteTreeRecords(&buf, goldenRecords(t)); err != nil {
 		t.Fatalf("WriteTreeRecords: %v", err)
 	}
-	golden.Assert(t, "testdata/format/v1/tree-records.bin", buf.Bytes())
+	golden.Assert(t, "../../vectors/format/v1/tree-records.bin", buf.Bytes())
 }
 
 func TestGoldenTreeDigest(t *testing.T) {
@@ -337,23 +337,19 @@ func TestGoldenTreeDigest(t *testing.T) {
 	if err != nil {
 		t.Fatalf("TreeDigest: %v", err)
 	}
-	golden.AssertString(t, "testdata/format/v1/tree-digest.txt", d.String()+"\n")
+	golden.AssertString(t, "../../vectors/format/v1/tree-digest.txt", d.String()+"\n")
 }
 
+// goldenRecords is the one fixture tree every published vector describes.
+//
+// It used to be a third, slightly different list: the tree-digest vector
+// covered six files while the config and layer vectors covered seven, so the
+// published set described three trees and an implementation comparing against
+// it could not pass all of them.
 func goldenRecords(t *testing.T) []FileRecord {
 	t.Helper()
 
-	records := []FileRecord{
-		{Path: "README.md", Mode: bundle.ModeFile, Size: 12, Digest: mustDigest(t, "hello world\n")},
-		{Path: "app/config/service.yaml", Mode: bundle.ModeFile, Size: 5, Digest: mustDigest(t, "a: 1\n")},
-		{Path: "app/scripts/run.sh", Mode: bundle.ModeExecutable, Size: 12, Digest: mustDigest(t, "#!/bin/sh\ns\n")},
-		{Path: "empty", Mode: bundle.ModeFile, Size: 0, Digest: mustDigest(t, "")},
-		{Path: "binary.dat", Mode: bundle.ModeFile, Size: 4, Digest: mustDigest(t, "\x00\x01\xfe\xff")},
-		{Path: "café/naïve.txt", Mode: bundle.ModeFile, Size: 3, Digest: mustDigest(t, "utf")},
-	}
-	slices.SortFunc(records, func(a, b FileRecord) int {
-		return strings.Compare(string(a.Path), string(b.Path))
-	})
+	records, _ := fixture(t)
 	return records
 }
 

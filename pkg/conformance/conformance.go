@@ -91,6 +91,16 @@ const (
 
 // Report is what an independent read established.
 type Report struct {
+	// Level is the level the read was performed at.
+	Level Level
+	// Deviations are canonical-encoding differences found while reading.
+	//
+	// At [LevelCanonical] a read fails on the first one, so this is empty or
+	// the read returned an error. At [LevelStructure] it is the list of things
+	// the pass tolerated, which is the difference between "verified" and
+	// "verified, and here is what a stricter reader would have said".
+	Deviations []string
+
 	// ManifestDigest is the subject identity: sha256 over the manifest bytes.
 	ManifestDigest string
 	// TreeDigest is recomputed here from the layer, not read from the config.
@@ -159,7 +169,7 @@ type index struct {
 // reference is accepted only when the layout holds exactly one manifest,
 // because guessing which of several a caller meant is how the wrong artifact
 // gets verified.
-func VerifyLayout(dir, reference string) (*Report, error) {
+func VerifyLayout(dir, reference string, level Level) (*Report, error) {
 	if err := checkLayoutMarker(dir); err != nil {
 		return nil, err
 	}
@@ -175,7 +185,7 @@ func VerifyLayout(dir, reference string) (*Report, error) {
 	}
 	return VerifyManifest(manifestBytes, func(digest string) ([]byte, error) {
 		return readBlob(dir, digest)
-	})
+	}, level)
 }
 
 // BlobFetcher supplies a blob by digest.
@@ -186,13 +196,20 @@ func VerifyLayout(dir, reference string) (*Report, error) {
 type BlobFetcher func(digest string) ([]byte, error)
 
 // VerifyManifest checks a manifest and everything it references.
-func VerifyManifest(manifestBytes []byte, fetch BlobFetcher) (*Report, error) {
+func VerifyManifest(manifestBytes []byte, fetch BlobFetcher, level Level) (*Report, error) {
+	if !level.valid() {
+		return nil, fmt.Errorf("level %s is not one an artifact can be checked at; "+
+			"byte conformance is checked against the published vectors", level)
+	}
+	found := &findings{level: level}
 	manifestDigest := digestOf(manifestBytes)
 
 	// The manifest's digest is the subject's identity, so its spelling is part
 	// of the format and not a detail of whoever encoded it.
-	if err := CheckCanonicalJSON(manifestBytes); err != nil {
-		return nil, fmt.Errorf("the manifest is not canonical JSON: %w", err)
+	if canonErr := CheckCanonicalJSON(manifestBytes); canonErr != nil {
+		if err := found.canonical("the manifest is not canonical JSON: %s", canonErr); err != nil {
+			return nil, err
+		}
 	}
 
 	// Decoding is strict: a field this reader does not know is a field it
@@ -227,7 +244,7 @@ func VerifyManifest(manifestBytes []byte, fetch BlobFetcher) (*Report, error) {
 	if err != nil {
 		return nil, fmt.Errorf("config blob: %w", err)
 	}
-	config, err := parseConfig(configBytes)
+	config, err := parseConfig(configBytes, found)
 	if err != nil {
 		return nil, err
 	}
@@ -237,7 +254,7 @@ func VerifyManifest(manifestBytes []byte, fetch BlobFetcher) (*Report, error) {
 		return nil, fmt.Errorf("layer blob: %w", err)
 	}
 
-	files, err := readLayer(layerBytes)
+	files, err := readLayer(layerBytes, found)
 	if err != nil {
 		return nil, err
 	}
@@ -257,6 +274,8 @@ func VerifyManifest(manifestBytes []byte, fetch BlobFetcher) (*Report, error) {
 	}
 
 	return &Report{
+		Level:            level,
+		Deviations:       found.notes,
 		ManifestDigest:   manifestDigest,
 		TreeDigest:       treeDigest,
 		ConfigTreeDigest: config.TreeDigest,
@@ -344,38 +363,45 @@ func toUint32(n int) (uint32, bool) {
 // compress/gzip silently tolerates an OS byte it has no opinion about.
 var gzipHeaderV1 = []byte{0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0xff}
 
-// readLayer decompresses and walks the tar, returning the file inventory.
-//
-// Directories are checked for canonical mode but are not returned: the tree
-// digest is over files alone.
-func readLayer(compressed []byte) ([]FileRecord, error) {
-	if len(compressed) < len(gzipHeaderV1) ||
-		!bytes.Equal(compressed[:len(gzipHeaderV1)], gzipHeaderV1) {
-
-		got := compressed
-		if len(got) > len(gzipHeaderV1) {
-			got = got[:len(gzipHeaderV1)]
-		}
-		return nil, fmt.Errorf("the gzip header is %x, want the frozen v1 header %x",
-			got, gzipHeaderV1)
-	}
-
+// decompress reads one gzip member in full.
+func decompress(compressed []byte) ([]byte, error) {
 	zr, err := gzip.NewReader(bytes.NewReader(compressed))
 	if err != nil {
 		return nil, fmt.Errorf("opening the gzip stream: %w", err)
 	}
 	defer func() { _ = zr.Close() }()
 
-	// The header bytes above already exclude a name, comment, extra field, and
-	// timestamp, because every one of them requires a flag bit this reader
-	// refuses. Reading the whole member still matters: it is what checks the
-	// trailing CRC and length.
 	plain, err := io.ReadAll(zr)
 	if err != nil {
 		return nil, fmt.Errorf("decompressing the layer: %w", err)
 	}
+	return plain, nil
+}
 
-	entries, err := readTar(plain)
+// readLayer decompresses and walks the tar, returning the file inventory.
+//
+// Directories are checked for canonical mode but are not returned: the tree
+// digest is over files alone.
+func readLayer(compressed []byte, found *findings) ([]FileRecord, error) {
+	if len(compressed) >= len(gzipHeaderV1) &&
+		!bytes.Equal(compressed[:len(gzipHeaderV1)], gzipHeaderV1) {
+
+		if err := found.canonical("the gzip header is %x, want the frozen v1 header %x",
+			compressed[:len(gzipHeaderV1)], gzipHeaderV1); err != nil {
+			return nil, err
+		}
+	}
+
+	// The header bytes above already exclude a name, comment, extra field, and
+	// timestamp, because every one of them requires a flag bit this reader
+	// refuses. Reading the whole member still matters: it is what checks the
+	// trailing CRC and length.
+	plain, err := decompress(compressed)
+	if err != nil {
+		return nil, err
+	}
+
+	entries, err := readTar(plain, found)
 	if err != nil {
 		return nil, err
 	}
@@ -407,7 +433,7 @@ func readLayer(compressed []byte) ([]FileRecord, error) {
 				name, string(entry.typeflag))
 		}
 
-		if err := checkPath(clean); err != nil {
+		if err := checkPath(clean, found); err != nil {
 			return nil, err
 		}
 		if seen[clean] {
@@ -420,7 +446,9 @@ func readLayer(compressed []byte) ([]FileRecord, error) {
 		// one path and silently keep whichever came last.
 		key := strings.ToLower(clean)
 		if other, collides := folded[key]; collides {
-			return nil, fmt.Errorf("paths %q and %q differ only by case", other, clean)
+			if err := found.canonical("paths %q and %q differ only by case", other, clean); err != nil {
+				return nil, err
+			}
 		}
 		folded[key] = clean
 
@@ -428,17 +456,25 @@ func readLayer(compressed []byte) ([]FileRecord, error) {
 		// two identical trees produce two different layer digests.
 		if isDir {
 			if inFiles {
-				return nil, fmt.Errorf(
+				if err := found.canonical(
 					"directory %q is emitted after a file; every directory precedes every file",
-					clean)
+					clean); err != nil {
+					return nil, err
+				}
 			}
 			if lastDir != "" && clean <= lastDir {
-				return nil, fmt.Errorf("directories are out of order: %q follows %q", clean, lastDir)
+				if err := found.canonical("directories are out of order: %q follows %q",
+					clean, lastDir); err != nil {
+					return nil, err
+				}
 			}
 			lastDir = clean
 		} else {
 			if lastFile != "" && clean <= lastFile {
-				return nil, fmt.Errorf("files are out of order: %q follows %q", clean, lastFile)
+				if err := found.canonical("files are out of order: %q follows %q",
+					clean, lastFile); err != nil {
+					return nil, err
+				}
 			}
 			lastFile, inFiles = clean, true
 		}
@@ -446,15 +482,19 @@ func readLayer(compressed []byte) ([]FileRecord, error) {
 		switch {
 		case isDir:
 			if entry.mode != modeDirectory {
-				return nil, fmt.Errorf("directory %q has mode %04o, want %04o",
-					clean, entry.mode, modeDirectory)
+				if err := found.canonical("directory %q has mode %04o, want %04o",
+					clean, entry.mode, modeDirectory); err != nil {
+					return nil, err
+				}
 			}
 			haveDirs[clean] = true
 
 		default:
 			if entry.mode != modeFile && entry.mode != modeExecutable {
-				return nil, fmt.Errorf("file %q has mode %04o, want %04o or %04o",
-					clean, entry.mode, modeFile, modeExecutable)
+				if err := found.canonical("file %q has mode %04o, want %04o or %04o",
+					clean, entry.mode, modeFile, modeExecutable); err != nil {
+					return nil, err
+				}
 			}
 
 			for parent := path.Dir(clean); parent != "." && parent != "/"; parent = path.Dir(parent) {
@@ -475,9 +515,14 @@ func readLayer(compressed []byte) ([]FileRecord, error) {
 			return nil, fmt.Errorf("the layer is missing the parent directory %q", dir)
 		}
 	}
+	// An extra directory is canonical rather than structural: it expands
+	// harmlessly, it is simply not what a conforming writer emits.
 	for dir := range haveDirs {
 		if !needDirs[dir] {
-			return nil, fmt.Errorf("the layer carries directory %q, which no file needs", dir)
+			if err := found.canonical("the layer carries directory %q, which no file needs",
+				dir); err != nil {
+				return nil, err
+			}
 		}
 	}
 
@@ -500,7 +545,11 @@ var reservedNames = map[string]bool{
 }
 
 // reservedRunes may not appear in a path segment.
-const reservedRunes = `<>:"\\|?*`
+//
+// The reverse solidus is absent because it is refused as a safety rule above:
+// a segment containing one names a different path on the platforms that treat
+// it as a separator.
+const reservedRunes = `<>:"|?*`
 
 // checkPath applies the canonical path rules from the specification.
 //
@@ -508,7 +557,10 @@ const reservedRunes = `<>:"\\|?*`
 // reader that enforced only the obvious ones would accept archives that no
 // conforming writer produces and that some consumer cannot expand, which is
 // the same as having no rule.
-func checkPath(p string) error {
+func checkPath(p string, found *findings) error {
+	// Safety first, and unconditionally. A path that escapes the destination or
+	// carries a NUL is not a canonical-encoding question: expanding it is the
+	// harm, so it fails at every level.
 	switch {
 	case p == "":
 		return errors.New("an entry has an empty path")
@@ -518,34 +570,52 @@ func checkPath(p string) error {
 		return fmt.Errorf("path %q is absolute", p)
 	case p != path.Clean(p):
 		return fmt.Errorf("path %q is not clean", p)
-	case !norm.NFC.IsNormalString(p):
-		return fmt.Errorf("path %q is not Unicode NFC", p)
+	case strings.ContainsRune(p, 0):
+		return fmt.Errorf("path %q contains a NUL", p)
+	case strings.Contains(p, `\`):
+		return fmt.Errorf("path %q contains a backslash", p)
 	}
-
-	for _, r := range p {
-		if r == 0 {
-			return fmt.Errorf("path %q contains a NUL", p)
-		}
-		if r < 0x20 || r == 0x7f {
-			return fmt.Errorf("path %q contains the control character U+%04X", p, r)
-		}
-	}
-
 	for _, segment := range strings.Split(p, "/") {
 		if segment == "" || segment == "." || segment == ".." {
 			return fmt.Errorf("path %q contains the element %q", p, segment)
 		}
+	}
+
+	// The rest is portability. Each of these expands correctly on the machine
+	// that built the artifact and fails somewhere else, which is the whole
+	// reason the format fixes them.
+	if !norm.NFC.IsNormalString(p) {
+		if err := found.canonical("path %q is not Unicode NFC", p); err != nil {
+			return err
+		}
+	}
+	for _, r := range p {
+		if r < 0x20 || r == 0x7f {
+			if err := found.canonical("path %q contains the control character U+%04X", p, r); err != nil {
+				return err
+			}
+			break
+		}
+	}
+	for _, segment := range strings.Split(p, "/") {
 		if strings.HasSuffix(segment, " ") || strings.HasSuffix(segment, ".") {
-			return fmt.Errorf("path %q has a segment ending in a space or period", p)
+			if err := found.canonical("path %q has a segment ending in a space or period", p); err != nil {
+				return err
+			}
 		}
 		if i := strings.IndexAny(segment, reservedRunes); i >= 0 {
-			return fmt.Errorf("path %q contains the reserved character %q", p, segment[i])
+			if err := found.canonical("path %q contains the reserved character %q",
+				p, segment[i]); err != nil {
+				return err
+			}
 		}
 		// Reserved with an extension too: CON.txt names the console on the
 		// platforms that reserve CON.
 		stem, _, _ := strings.Cut(segment, ".")
 		if reservedNames[strings.ToLower(stem)] {
-			return fmt.Errorf("path %q uses the reserved device name %q", p, stem)
+			if err := found.canonical("path %q uses the reserved device name %q", p, stem); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
@@ -606,7 +676,7 @@ func matchInventory(config *configBlob, files []FileRecord) error {
 	return nil
 }
 
-func parseConfig(data []byte) (*configBlob, error) {
+func parseConfig(data []byte, found *findings) (*configBlob, error) {
 	var config configBlob
 	if err := strictJSON(data, &config); err != nil {
 		return nil, fmt.Errorf("decoding the config: %w", err)
@@ -622,8 +692,10 @@ func parseConfig(data []byte) (*configBlob, error) {
 		return nil, fmt.Errorf("config treeDigest: %w", err)
 	}
 
-	if err := CheckCanonicalJSON(data); err != nil {
-		return nil, fmt.Errorf("the config blob is not canonical JSON: %w", err)
+	if canonErr := CheckCanonicalJSON(data); canonErr != nil {
+		if err := found.canonical("the config blob is not canonical JSON: %s", canonErr); err != nil {
+			return nil, err
+		}
 	}
 	return &config, nil
 }

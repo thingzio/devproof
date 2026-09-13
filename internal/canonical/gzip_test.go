@@ -246,5 +246,5 @@ func TestGoldenGzip(t *testing.T) {
 		strings.Repeat("\x00", 512) +
 		"tail")
 
-	golden.Assert(t, "testdata/format/v1/gzip-sample.gz", gzipBytes(t, payload))
+	golden.Assert(t, "../../vectors/format/v1/gzip-sample.gz", gzipBytes(t, payload))
 }

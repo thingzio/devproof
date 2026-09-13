@@ -77,7 +77,7 @@ func TestIndependentReadAgreesOnDigests(t *testing.T) {
 		"deeply/nested/dir/x.txt": "x\n",
 	})
 
-	report, err := conformance.VerifyLayout(layout, "v1")
+	report, err := conformance.VerifyLayout(layout, "v1", conformance.LevelCanonical)
 	if err != nil {
 		t.Fatalf("independent verification failed: %v", err)
 	}
@@ -105,11 +105,11 @@ func TestResolveByDigestAndTag(t *testing.T) {
 
 	layout, built := build(t, map[string]string{"a.txt": "a\n"})
 
-	byTag, err := conformance.VerifyLayout(layout, "v1")
+	byTag, err := conformance.VerifyLayout(layout, "v1", conformance.LevelCanonical)
 	if err != nil {
 		t.Fatalf("by tag: %v", err)
 	}
-	byDigest, err := conformance.VerifyLayout(layout, built.SubjectDigest)
+	byDigest, err := conformance.VerifyLayout(layout, built.SubjectDigest, conformance.LevelCanonical)
 	if err != nil {
 		t.Fatalf("by digest: %v", err)
 	}
@@ -139,7 +139,7 @@ func TestIndependentReadHandlesAwkwardTrees(t *testing.T) {
 			t.Parallel()
 
 			layout, built := build(t, files)
-			report, err := conformance.VerifyLayout(layout, "v1")
+			report, err := conformance.VerifyLayout(layout, "v1", conformance.LevelCanonical)
 			if err != nil {
 				t.Fatalf("independent verification failed: %v", err)
 			}
@@ -214,13 +214,13 @@ func TestCorruptionIsDetected(t *testing.T) {
 				"README.md": "hello\n",
 				"a/b.txt":   strings.Repeat("padding to make this the largest blob\n", 32),
 			})
-			if _, err := conformance.VerifyLayout(layout, "v1"); err != nil {
+			if _, err := conformance.VerifyLayout(layout, "v1", conformance.LevelCanonical); err != nil {
 				t.Fatalf("the unmodified artifact did not verify: %v", err)
 			}
 
 			tc.mutate(t, layout, built)
 
-			_, err := conformance.VerifyLayout(layout, "v1")
+			_, err := conformance.VerifyLayout(layout, "v1", conformance.LevelCanonical)
 			if err == nil {
 				t.Fatal("a corrupted artifact verified successfully")
 			}
