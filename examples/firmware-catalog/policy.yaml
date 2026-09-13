@@ -1,0 +1,9 @@
+apiVersion: devproof.thingz.io/v1alpha1
+kind: VerificationPolicy
+metadata:
+  name: qualified-stack
+spec:
+  subject:
+    requireDigestReference: true
+  provenance:
+    required: true

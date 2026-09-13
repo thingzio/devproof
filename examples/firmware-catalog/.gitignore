@@ -1,0 +1,9 @@
+# Scratch output from running the walkthrough in this directory.
+stack/
+signed/
+altered/
+staged/
+signer.pem
+gpu.yaml.orig
+signer.pub.pem
+trust.yaml

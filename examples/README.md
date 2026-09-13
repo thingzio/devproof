@@ -6,7 +6,11 @@ another.
 
 | Example | Shows | Needs |
 | --- | --- | --- |
-| [tamper-and-trust](tamper-and-trust/) | Why a digest is a name you can rely on: identical builds, what `verify` does and does not claim, a policy that writes nothing when it fails, and what happens when someone changes the stored bytes. | `devproof` newer than `v0.1.1`, `python3` |
+| [tamper-and-trust](tamper-and-trust/) | Why a digest is a name you can rely on: identical builds, what `verify` does and does not claim, a policy that writes nothing when it fails, and what happens when someone changes the stored bytes. | `devproof` ≥ `v0.2.0`, `python3` |
+| [firmware-catalog](firmware-catalog/) | The same ideas against a real inventory: a rack firmware stack from public NVIDIA release notes, diffed across two hardware generations, signed, and verified with the network refused. | `devproof` ≥ `v0.2.0`, `python3`, `openssl` |
+
+Start with **tamper-and-trust**; it is shorter and everything in the second one
+builds on it.
 
 ## How these are kept true
 
