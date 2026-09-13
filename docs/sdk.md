@@ -117,11 +117,18 @@ type ResolveRequest struct {
 
 type Snapshot interface {
     Material() Material
-    Files() []File
-    Open(context.Context, string) (io.ReadCloser, error)
+    Records() []bundle.FileRecord
+    Open(context.Context, bundle.Path) (io.ReadCloser, error)
     Close() error
 }
 ```
+
+Every type here is public. That is load-bearing rather than tidy: this
+interface previously returned types under `internal/`, which Go forbids an
+external module from naming, so a resolver could be described and registered
+and never actually written by anyone outside this repository. A module under
+`internal/repo/testdata` implements the contract and is compiled by the test
+suite, because no test inside this module could have caught it.
 
 `Files` returns source-relative canonical records in sorted order. Returned
 slices are immutable from the caller's perspective. `Open` accepts only a path

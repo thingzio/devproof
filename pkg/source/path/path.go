@@ -187,11 +187,11 @@ type pathSnapshot struct {
 	material source.Material
 }
 
-func (s *pathSnapshot) Material() source.Material       { return s.material }
-func (s *pathSnapshot) Records() []canonical.FileRecord { return s.inner.Records() }
-func (s *pathSnapshot) Close() error                    { return s.inner.Close() }
+func (s *pathSnapshot) Material() source.Material    { return s.material }
+func (s *pathSnapshot) Records() []bundle.FileRecord { return s.inner.Records() }
+func (s *pathSnapshot) Close() error                 { return s.inner.Close() }
 
-func (s *pathSnapshot) Open(ctx context.Context, p canonical.Path) (io.ReadCloser, error) {
+func (s *pathSnapshot) Open(ctx context.Context, p bundle.Path) (io.ReadCloser, error) {
 	return s.inner.Open(ctx, p)
 }
 

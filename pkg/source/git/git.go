@@ -507,10 +507,10 @@ type gitSnapshot struct {
 	material source.Material
 }
 
-func (s *gitSnapshot) Material() source.Material       { return s.material }
-func (s *gitSnapshot) Records() []canonical.FileRecord { return s.inner.Records() }
-func (s *gitSnapshot) Close() error                    { return s.inner.Close() }
+func (s *gitSnapshot) Material() source.Material    { return s.material }
+func (s *gitSnapshot) Records() []bundle.FileRecord { return s.inner.Records() }
+func (s *gitSnapshot) Close() error                 { return s.inner.Close() }
 
-func (s *gitSnapshot) Open(ctx context.Context, p canonical.Path) (io.ReadCloser, error) {
+func (s *gitSnapshot) Open(ctx context.Context, p bundle.Path) (io.ReadCloser, error) {
 	return s.inner.Open(ctx, p)
 }

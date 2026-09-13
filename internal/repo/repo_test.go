@@ -18,6 +18,7 @@ package repo_test
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -69,5 +70,34 @@ func TestCodeownersPathsExist(t *testing.T) {
 
 	if checked == 0 {
 		t.Fatal("no literal CODEOWNERS patterns were checked; the parser is wrong")
+	}
+}
+
+// TestExternalModuleCanImplementTheResolverContract compiles a module outside
+// this one against the public source interfaces.
+//
+// No test inside this repository can establish this. Every package here may
+// name types under internal/, so a contract written in terms of them compiles
+// and passes and is still unimplementable by anyone else -- which is what had
+// happened: source.Snapshot returned internal/canonical types, and Go forbids
+// an external module from naming those, so DP-009's registered resolvers
+// could be described, and called, and never written.
+//
+// The fixture lives under testdata, which the go tool ignores, so it has its
+// own module and does not affect this one's dependencies.
+func TestExternalModuleCanImplementTheResolverContract(t *testing.T) {
+	if testing.Short() {
+		t.Skip("compiles a separate module")
+	}
+
+	dir := filepath.Join("testdata", "external-resolver")
+	if _, err := os.Stat(filepath.Join(dir, "go.mod")); err != nil {
+		t.Fatalf("the external fixture is missing: %v", err)
+	}
+
+	cmd := exec.Command("go", "build", "./...")
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("a module outside devproof cannot implement source.Resolver:\n%s", out)
 	}
 }

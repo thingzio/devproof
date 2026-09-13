@@ -28,7 +28,6 @@ import (
 	"context"
 	"io"
 
-	"github.com/thingzio/devproof/internal/canonical"
 	"github.com/thingzio/devproof/pkg/bundle"
 )
 
@@ -104,10 +103,10 @@ type Snapshot interface {
 
 	// Records returns the canonical file records, source-relative and sorted
 	// by path.
-	Records() []canonical.FileRecord
+	Records() []bundle.FileRecord
 
 	// Open returns the content of a path previously returned by Records.
-	Open(ctx context.Context, path canonical.Path) (io.ReadCloser, error)
+	Open(ctx context.Context, path bundle.Path) (io.ReadCloser, error)
 
 	// Close releases the snapshot's private storage.
 	Close() error
@@ -134,5 +133,5 @@ type Material struct {
 
 	// TreeDigest is the canonical digest of the filtered, source-relative
 	// contribution.
-	TreeDigest canonical.Digest
+	TreeDigest bundle.Digest
 }

@@ -31,6 +31,7 @@ import (
 
 	"golang.org/x/text/unicode/norm"
 
+	"github.com/thingzio/devproof/pkg/bundle"
 	"github.com/thingzio/devproof/pkg/fault"
 )
 
@@ -58,9 +59,10 @@ type PathLimits struct {
 
 // Path is a validated, normalized, relative bundle path. Its zero value is
 // not a valid path; obtain one from [NormalizePath].
-type Path string
-
-func (p Path) String() string { return string(p) }
+//
+// Aliased from bundle so that a resolver written outside this module can name
+// what it returns; normalization itself stays here.
+type Path = bundle.Path
 
 // reservedNames are the Windows device names. A file called CON cannot be
 // created on Windows under any extension, so a bundle containing one could be
@@ -175,7 +177,12 @@ func validateSegment(seg, full string, lim PathLimits) error {
 
 // Parents returns p's required parent directories, shallowest first. A path
 // with no separator has none.
-func (p Path) Parents() []string {
+//
+// A function rather than a method: Path is aliased from bundle so that an
+// external resolver can name it, and these two helpers are format-internal
+// rather than part of that contract. Keeping them here keeps the public type
+// to what a caller actually needs.
+func Parents(p Path) []string {
 	s := string(p)
 	var out []string
 	for i, r := range s {
@@ -191,7 +198,7 @@ func (p Path) Parents() []string {
 // Simple folding, matching what APFS, HFS+, and NTFS actually merge. Full
 // folding would additionally collapse "ß" onto "ss", which no filesystem
 // does, and would reject bundles that expand cleanly everywhere (DP-017).
-func (p Path) FoldKey() string { return foldString(string(p)) }
+func FoldKey(p Path) string { return foldString(string(p)) }
 
 func foldString(s string) string {
 	if isASCII(s) {

@@ -299,7 +299,7 @@ func TestParents(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(string(tc.in), func(t *testing.T) {
 			t.Parallel()
-			got := tc.in.Parents()
+			got := Parents(tc.in)
 			if len(got) != len(tc.want) {
 				t.Fatalf("Parents(%q) = %v, want %v", tc.in, got, tc.want)
 			}

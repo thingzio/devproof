@@ -43,22 +43,10 @@ func DigestOf(b []byte) Digest { return bundle.DigestOf(b) }
 // ParseDigest accepts the OCI "sha256:<64 lowercase hex>" form.
 func ParseDigest(s string) (Digest, error) { return bundle.ParseDigest(s) }
 
-// FileRecord is one entry of the canonical inventory: everything about a file
-// that contributes to identity, and nothing that does not.
-//
-// Ownership, timestamps, and link targets are absent by construction rather
-// than normalized away later, so there is no code path where one could reach
-// the tree digest.
-type FileRecord struct {
-	// Path is the canonical bundle-relative path.
-	Path Path
-	// Mode is the normalized mode: bundle.ModeFile or bundle.ModeExecutable.
-	Mode uint32
-	// Size is the file's length in bytes.
-	Size int64
-	// Digest is the SHA-256 of the file's exact content bytes.
-	Digest Digest
-}
+// FileRecord is aliased from bundle for the same reason Digest is: it appears
+// in the public source-resolver contract, and a type an external module
+// cannot name is one it cannot implement against.
+type FileRecord = bundle.FileRecord
 
 // WriteTreeRecords writes the normative v1 tree record stream to w.
 //

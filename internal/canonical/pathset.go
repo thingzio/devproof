@@ -72,7 +72,7 @@ func (s *PathSet) Add(p Path) error {
 		return fault.New(fault.CodeUnsafePath, setOp, "path must not be empty")
 	}
 
-	for _, dir := range p.Parents() {
+	for _, dir := range Parents(p) {
 		switch s.nodes[dir] {
 		case nodeFile:
 			return fault.New(fault.CodePathCollision, setOp,

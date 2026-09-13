@@ -206,7 +206,7 @@ func TestPathSetDirectoriesPlaceParentsBeforeChildren(t *testing.T) {
 	}
 
 	for i, dir := range dirs {
-		for _, parent := range Path(dir).Parents() {
+		for _, parent := range Parents(Path(dir)) {
 			if idx := slices.Index(dirs, parent); idx >= i {
 				t.Errorf("parent %q appears at %d, after its child %q at %d", parent, idx, dir, i)
 			}
