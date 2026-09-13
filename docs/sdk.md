@@ -287,9 +287,13 @@ Locked manifest builds do not refresh locks implicitly.
 trust roots, evidence-selection rules, and resource limits. It does not require
 an expansion destination.
 
-`VerifyResult` contains separate integrity, trust, and semantic status values,
-the resolved subject digest, verified evidence identities, policy digest,
-findings, and warnings.
+Verify returns a [`policy.Report`](../schemas/proof-report.v1.schema.json)
+rather than a type of its own: the result of a verification is the proof
+report, and a second type wrapping it would be a second thing to keep in step.
+It carries separate integrity, trust, and semantic status values, the resolved
+subject digest, the accepted signer identities and the evidence they signed,
+the policy digest and trust-root digests, the effective limits, and the
+findings.
 
 The absence of a policy produces `trust: not-evaluated`, not `pass`.
 

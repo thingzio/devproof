@@ -191,3 +191,62 @@ func TestDocumentedSchemasExist(t *testing.T) {
 		t.Error("no schema references were checked; the pattern has stopped matching")
 	}
 }
+
+// TestDocumentedSDKTypesExist catches a reference naming a type the SDK does
+// not have.
+//
+// The SDK reference is read by somebody writing code against it, so a type it
+// names is a type they expect to compile. It named VerifyResult, which never
+// existed: verification returns the proof report, and a second type wrapping
+// it would be a second thing to keep in step.
+func TestDocumentedSDKTypesExist(t *testing.T) {
+	t.Parallel()
+
+	root := repo.Root()
+	data, err := os.ReadFile(filepath.Join(root, "docs", "sdk.md"))
+	if err != nil {
+		t.Fatalf("reading the SDK reference: %v", err)
+	}
+
+	// Request and result types are the reference's load-bearing names and the
+	// ones a reader types verbatim. Narrowing to that suffix keeps the check
+	// from guessing at prose that happens to be capitalized.
+	pattern := regexp.MustCompile("`([A-Z][A-Za-z0-9]*(Request|Result))`")
+
+	declared, err := declaredTypes(root)
+	if err != nil {
+		t.Fatalf("scanning declared types: %v", err)
+	}
+
+	var checked int
+	for _, match := range pattern.FindAllStringSubmatch(string(data), -1) {
+		checked++
+		if !declared[match[1]] {
+			t.Errorf("docs/sdk.md names the type %s, which no package declares", match[1])
+		}
+	}
+	if checked == 0 {
+		t.Error("no SDK types were checked; the pattern has stopped matching")
+	}
+}
+
+// declaredTypes collects every type name declared under pkg/.
+func declaredTypes(root string) (map[string]bool, error) {
+	declaration := regexp.MustCompile(`(?m)^type ([A-Z][A-Za-z0-9]*) `)
+	declared := map[string]bool{}
+
+	err := filepath.WalkDir(filepath.Join(root, "pkg"), func(path string, entry fs.DirEntry, err error) error {
+		if err != nil || entry.IsDir() || !strings.HasSuffix(path, ".go") {
+			return err
+		}
+		data, readErr := os.ReadFile(path) //nolint:gosec // a repository path
+		if readErr != nil {
+			return readErr
+		}
+		for _, match := range declaration.FindAllStringSubmatch(string(data), -1) {
+			declared[match[1]] = true
+		}
+		return nil
+	})
+	return declared, err
+}
