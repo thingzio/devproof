@@ -304,6 +304,34 @@ policy-accepted. It performs no expansion and no remote mutation.
 `--files` includes the potentially large file inventory. `--evidence` includes
 referrer summaries. Full evidence payloads require `--evidence-content`.
 
+## `devproof conformance`
+
+```text
+devproof conformance ./layout --reference v1
+devproof conformance ./layout --level structure
+devproof conformance ./vectors/format/v1 --level bytes
+```
+
+Reads the artifact with an independent implementation built from
+[the format specification](bundle-format.md), sharing no code with the writer
+(DP-034). It is the check to run against another implementation's output, and
+it needs no policy, no evidence, and no network.
+
+| `--level` | Question |
+| --- | --- |
+| `structure` | is it intact, self-consistent, and safe to expand? |
+| `canonical` | are these the only bytes a conforming writer produces for this tree? |
+| `bytes` | is this identical to the published vectors in [vectors/](../vectors)? |
+
+The default is `canonical`. A deviation found above the requested level is
+printed as a warning and counted in the result rather than discarded, so a
+structural pass still says what it tolerated.
+
+`bytes` takes a directory of vector files rather than a layout: byte
+conformance is a claim about what an encoder produced.
+
+A non-conforming artifact exits with the invalid-artifact code.
+
 ## Authentication and interaction
 
 Registry credentials come from the Docker configuration — `DOCKER_CONFIG` or

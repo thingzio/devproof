@@ -146,6 +146,7 @@ func (a *App) command() *cli.Command {
 		a.diffCommand(),
 		a.copyCommand(),
 		a.inspectCommand(),
+		a.conformanceCommand(),
 		a.versionCommand(),
 	}
 	// Applied here rather than in each constructor: the hook is per-command
