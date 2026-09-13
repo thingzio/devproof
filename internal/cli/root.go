@@ -45,6 +45,13 @@ import (
 // by accident changes behavior nobody asked to change.
 const envPrefix = "DEVPROOF_"
 
+// defaultTimeout bounds every command that does not set one.
+//
+// Long enough for a large bundle over a slow link, short enough that a hung
+// operation fails a pipeline instead of occupying a runner until somebody
+// notices.
+const defaultTimeout = 30 * time.Minute
+
 // App is the command tree plus the state a run needs.
 type App struct {
 	Streams Streams
@@ -218,7 +225,7 @@ func (a *App) globalFlags() []cli.Flag {
 		&cli.DurationFlag{
 			Name:    "timeout",
 			Usage:   "overall operation timeout",
-			Value:   30 * time.Minute,
+			Value:   defaultTimeout,
 			Sources: cli.EnvVars(envPrefix + "TIMEOUT"),
 		},
 		&cli.BoolFlag{
@@ -295,13 +302,20 @@ func (a *App) configure(cmd *cli.Command) error {
 		}
 		timeout = parsed
 	}
+	// Refused rather than read as "no deadline". There is no spelling for
+	// unbounded, and an operation that can run forever is one that hangs a CI
+	// job until somebody notices.
+	if timeout <= 0 {
+		return fault.New(fault.CodeInvalidInput, "cli",
+			fmt.Sprintf("the timeout is %s; there is no value meaning unbounded", timeout))
+	}
 	a.timeout = timeout
 
 	a.printer.Format = format
 	a.printer.Quiet = quiet
-	a.printer.Verbose = cmd.Bool("verbose") || a.config.Verbose
-	a.printer.Debug = cmd.Bool("debug") || a.config.Debug
-	a.printer.NoColor = cmd.Bool("no-color") || a.config.NoColor
+	a.printer.Verbose = boolSetting(cmd, "verbose", a.config.Verbose)
+	a.printer.Debug = boolSetting(cmd, "debug", a.config.Debug)
+	a.printer.NoColor = boolSetting(cmd, "no-color", a.config.NoColor)
 
 	if a.printer.Debug {
 		a.reportSettings(cmd, path)
@@ -330,6 +344,19 @@ func (a *App) reportSettings(cmd *cli.Command, configPath string) {
 		settingSource(cmd, "format", a.config.Format != ""))
 	a.printer.Info("timeout: %s (%s)", a.timeout,
 		settingSource(cmd, "timeout", a.config.Timeout != ""))
+}
+
+// boolSetting resolves a boolean with the documented precedence.
+//
+// These were OR'd with the configured value, which made a file that turned
+// something on impossible to turn off for one invocation: --verbose=false and
+// DEVPROOF_VERBOSE=false were both discarded. A default that cannot be
+// overridden is not a default.
+func boolSetting(cmd *cli.Command, flag string, fromConfig bool) bool {
+	if cmd.IsSet(flag) {
+		return cmd.Bool(flag)
+	}
+	return fromConfig || cmd.Bool(flag)
 }
 
 // settingSource names where a resolved value came from.
@@ -400,9 +427,11 @@ func (a *App) client(cmd *cli.Command, extra ...devproof.Option) (*devproof.Clie
 // withTimeout applies the overall operation deadline, resolved by configure.
 func (a *App) withTimeout(ctx context.Context) (context.Context, context.CancelFunc) {
 	if a.timeout <= 0 {
-		// Zero does not silently mean unbounded: an operation with no
-		// deadline is one that can hang a CI job forever.
-		return context.WithCancel(ctx)
+		// Unreachable through the CLI, which refuses a non-positive value
+		// while resolving it. An App built directly still gets a deadline:
+		// this branch used to return an undeadlined context, which is the one
+		// outcome the refusal above exists to prevent.
+		return context.WithTimeout(ctx, defaultTimeout)
 	}
 	return context.WithTimeout(ctx, a.timeout)
 }

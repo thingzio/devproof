@@ -260,3 +260,56 @@ func TestDebugReportOmitsSecrets(t *testing.T) {
 		}
 	}
 }
+
+// TestBooleanFlagOverridesConfigFile covers a precedence rule the documented
+// table promised and the code inverted.
+//
+// String settings resolved flag-first, but the booleans were OR'd with the
+// configured value: `verbose: true` in a file could not be turned off by
+// --verbose=false or by DEVPROOF_VERBOSE=false. A setting that cannot be
+// overridden for one invocation is not a default, and the documented
+// precedence said otherwise.
+func TestBooleanFlagOverridesConfigFile(t *testing.T) {
+	config := writeConfig(t, "debug: true\n")
+
+	// The debug settings report is the observable effect of debug being on.
+	const report = "config file:"
+
+	if got := run(t, "--config", config, "version"); !strings.Contains(got.stderr, report) {
+		t.Fatalf("the configured default did not apply: %q", got.stderr)
+	}
+	if got := run(t, "--config", config, "--debug=false", "version"); strings.Contains(got.stderr, report) {
+		t.Errorf("--debug=false did not override the configuration file: %q", got.stderr)
+	}
+
+	t.Setenv("DEVPROOF_DEBUG", "false")
+	if got := run(t, "--config", config, "version"); strings.Contains(got.stderr, report) {
+		t.Errorf("DEVPROOF_DEBUG=false did not override the configuration file: %q", got.stderr)
+	}
+}
+
+// TestNonPositiveTimeoutIsRejected covers the other half of the same promise.
+//
+// The documentation says a value of zero does not silently mean unbounded, and
+// the code that applied it said so in a comment while returning a context with
+// no deadline -- so --timeout 0 produced exactly the run that can hang a CI job
+// forever. There is no spelling for unbounded, so the value is refused where
+// somebody can fix it.
+func TestNonPositiveTimeoutIsRejected(t *testing.T) {
+	t.Parallel()
+
+	for _, value := range []string{"0s", "-5s"} {
+		t.Run(value, func(t *testing.T) {
+			t.Parallel()
+
+			if got := run(t, "--timeout", value, "version"); got.code != fault.ExitUsage {
+				t.Errorf("--timeout %s: exit = %d, want %d", value, got.code, fault.ExitUsage)
+			}
+
+			config := writeConfig(t, "timeout: "+value+"\n")
+			if got := run(t, "--config", config, "version"); got.code != fault.ExitUsage {
+				t.Errorf("configured timeout %s: exit = %d, want %d", value, got.code, fault.ExitUsage)
+			}
+		})
+	}
+}

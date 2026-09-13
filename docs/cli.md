@@ -40,9 +40,10 @@ beyond executable loading, or making a network request.
 the JSON value as its quiet output. `--debug` never changes the data written to
 stdout.
 
-The default timeout is 30 minutes for every command and is printed by help. A
-value of zero does not silently mean unbounded; unbounded behavior, if
-supported, requires an explicit spelling.
+The default timeout is 30 minutes for every command and is printed by help.
+There is no spelling for unbounded: a zero or negative `--timeout`, or a
+configured one, is a usage error rather than an operation that can occupy a CI
+runner until somebody notices.
 
 `--insecure-registry` sends credentials and content in the clear and warns on
 stderr every time it is used.
@@ -54,6 +55,10 @@ Highest priority wins:
 ```text
 explicit flag > DEVPROOF_* environment variable > config file > built-in default
 ```
+
+The table applies to every setting, including the boolean ones: a file that
+sets `verbose` or `debug` supplies a default, and `--verbose=false` or
+`DEVPROOF_VERBOSE=false` turns it off for one invocation.
 
 Manifest, lock, and verification-policy data are not CLI settings and are not
 silently loaded from a user-global configuration file.

@@ -50,15 +50,15 @@
 //
 // This package is the facade. The operation contracts live alongside it:
 //
-//   - [github.com/thingzio/devproof/bundle]: format constants, manifest, lock,
+//   - [github.com/thingzio/devproof/pkg/bundle]: format constants, manifest, lock,
 //     inventory, and resource limits.
-//   - [github.com/thingzio/devproof/source]: the source resolver contract and
+//   - [github.com/thingzio/devproof/pkg/source]: the source resolver contract and
 //     the built-in local-path and HTTPS Git resolvers.
-//   - [github.com/thingzio/devproof/artifact]: OCI descriptors, references,
+//   - [github.com/thingzio/devproof/pkg/artifact]: OCI descriptors, references,
 //     and the transport contract.
-//   - [github.com/thingzio/devproof/evidence]: provenance statements and the
+//   - [github.com/thingzio/devproof/pkg/evidence]: provenance statements and the
 //     attester contract.
-//   - [github.com/thingzio/devproof/policy]: verification policy documents and
+//   - [github.com/thingzio/devproof/pkg/policy]: verification policy documents and
 //     result types.
 //
 // Canonical byte production is deliberately internal. It is reached through

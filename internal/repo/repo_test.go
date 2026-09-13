@@ -17,9 +17,11 @@
 package repo_test
 
 import (
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -100,4 +102,58 @@ func TestExternalModuleCanImplementTheResolverContract(t *testing.T) {
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("a module outside devproof cannot implement source.Resolver:\n%s", out)
 	}
+}
+
+// TestDocLinksNameRealPackages catches a godoc link to a package that does not
+// exist.
+//
+// A bracketed link in a doc comment is silently inert when it names nothing:
+// pkg.go.dev renders the text and no link, and the reader sees an import path
+// that will not compile. The SDK's own package overview listed five of them at
+// pre-`pkg/` paths — the "Layout" section whose entire job is telling a new
+// caller where to look.
+func TestDocLinksNameRealPackages(t *testing.T) {
+	t.Parallel()
+
+	root := repo.Root()
+	const prefix = "github.com/thingzio/devproof/"
+	pattern := regexp.MustCompile(`\[` + regexp.QuoteMeta(prefix) + `[a-z0-9/]+\]`)
+
+	var checked int
+	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil || entry.IsDir() || !strings.HasSuffix(path, ".go") {
+			return err
+		}
+		data, readErr := os.ReadFile(path) //nolint:gosec // a repository path
+		if readErr != nil {
+			return readErr
+		}
+		for _, match := range pattern.FindAllString(string(data), -1) {
+			link := strings.Trim(match, "[]")
+			dir := filepath.Join(root, filepath.FromSlash(strings.TrimPrefix(link, prefix)))
+
+			checked++
+			if info, statErr := os.Stat(dir); statErr != nil || !info.IsDir() {
+				t.Errorf("%s links to %s, which is not a package in this module",
+					mustRel(t, root, path), link)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walking the repository: %v", err)
+	}
+	if checked == 0 {
+		t.Error("no package links were checked; the pattern has stopped matching")
+	}
+}
+
+func mustRel(t *testing.T, root, path string) string {
+	t.Helper()
+
+	rel, err := filepath.Rel(root, path)
+	if err != nil {
+		return path
+	}
+	return rel
 }
