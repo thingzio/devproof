@@ -485,6 +485,21 @@ func (a *App) verificationOptions(cmd *cli.Command) ([]devproof.Option, error) {
 	return append(opts, devproof.WithSigstore(sigstoreOpts)), nil
 }
 
+// offlineOption turns --offline into the client capability boundary.
+//
+// Separate from verificationOptions because offline applies to every command
+// that touches a reference, including the ones that verify nothing. The flag
+// used to reach only the check above, so it asked for a trust root and then
+// let a remote reference fetch anyway -- it described an intention and
+// enforced none of it.
+func (a *App) offlineOption(cmd *cli.Command) []devproof.Option {
+	if !cmd.Bool("offline") {
+		return nil
+	}
+	a.reportSetting(cmd, "offline", "offline", "true", false)
+	return []devproof.Option{devproof.WithOffline()}
+}
+
 // logger routes SDK diagnostics to stderr, and only when asked for.
 func (a *App) logger() *slogLogger {
 	return newStderrLogger(a.Streams.Err, a.printer.Verbose, a.printer.Debug)

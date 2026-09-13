@@ -195,3 +195,42 @@ func TestDiffReportsAnUnreadableOperand(t *testing.T) {
 		t.Errorf("a missing directory was reported as a registry problem: %q", got.stderr)
 	}
 }
+
+// TestOfflineRefusesARemoteReference covers the flag end to end.
+//
+// --offline used to reach only a check that a trust root had been supplied;
+// it was never passed to the SDK, so a remote reference fetched exactly as it
+// would have without it. The failure here must be the refusal, not a network
+// error that happens to look like one.
+func TestOfflineRefusesARemoteReference(t *testing.T) {
+	t.Parallel()
+
+	root := filepath.Join(t.TempDir(), "trusted-root.json")
+	if err := os.WriteFile(root, []byte(`{}`), 0o644); err != nil {
+		t.Fatalf("writing a trust root: %v", err)
+	}
+
+	got := run(t, "verify", "oci://registry.invalid/team/config:v1",
+		"--offline", "--trust-root", root)
+
+	if got.code == fault.ExitSuccess {
+		t.Fatal("an offline verify of a remote reference succeeded")
+	}
+	if !strings.Contains(got.stderr, "offline") {
+		t.Errorf("the failure does not mention offline, so it may be a network "+
+			"error rather than a refusal: %q", got.stderr)
+	}
+}
+
+// TestOfflineStillNeedsTrustMaterial keeps the older check working.
+func TestOfflineStillNeedsTrustMaterial(t *testing.T) {
+	t.Parallel()
+
+	got := run(t, "verify", "oci-layout://"+t.TempDir()+":v1", "--offline")
+	if got.code != fault.ExitUsage {
+		t.Errorf("exit = %d, want %d", got.code, fault.ExitUsage)
+	}
+	if !strings.Contains(got.stderr, "--trust-root") {
+		t.Errorf("the error does not say what is missing: %q", got.stderr)
+	}
+}

@@ -39,6 +39,15 @@ func (c *Client) transportFor(ref artifact.Reference) (artifact.Transport, error
 		return nil, fault.New(fault.CodeUnsupportedSource, transportOp,
 			fmt.Sprintf("no transport is registered for %q references", ref.Scheme))
 	}
+	// Refused here, where the transport is chosen, rather than at each call
+	// site. This is the one place every operation passes through to reach a
+	// transport, so there is no path that acquires one without being asked
+	// this question.
+	if c.offline && !artifact.IsLocalOnly(transport) {
+		return nil, fault.New(fault.CodeInvalidInput, transportOp,
+			fmt.Sprintf("this client is offline, and %q references need the network",
+				ref.Scheme))
+	}
 	return transport, nil
 }
 

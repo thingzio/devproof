@@ -66,6 +66,29 @@ type Transport interface {
 	Close() error
 }
 
+// LocalOnly is implemented by a transport that never opens a network
+// connection.
+//
+// It is how a transport opts in to being usable offline. The interface is
+// optional and the default is the refusing one: a transport that does not
+// implement it is treated as network-capable, because the safe assumption
+// about an implementation nobody here wrote is that it might dial.
+//
+// Declaring it is a promise about the whole operation, not about a single
+// method. A transport that reads from disk but consults a remote index to
+// resolve a tag is not local-only.
+type LocalOnly interface {
+	// LocalOnly reports that this transport reads and writes only local
+	// storage.
+	LocalOnly() bool
+}
+
+// IsLocalOnly reports whether a transport has promised not to use the network.
+func IsLocalOnly(transport Transport) bool {
+	local, ok := transport.(LocalOnly)
+	return ok && local.LocalOnly()
+}
+
 // Credential authenticates to a registry.
 //
 // It carries no host: a credential is selected for a host by the provider,

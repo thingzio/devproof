@@ -399,6 +399,7 @@ func (a *App) verifyCommand() *cli.Command {
 			if err != nil {
 				return err
 			}
+			extra = append(extra, a.offlineOption(cmd)...)
 			client, err := a.client(cmd, extra...)
 			if err != nil {
 				return err
@@ -461,6 +462,7 @@ func (a *App) expandCommand() *cli.Command {
 			if err != nil {
 				return err
 			}
+			extra = append(extra, a.offlineOption(cmd)...)
 			client, err := a.client(cmd, extra...)
 			if err != nil {
 				return err
@@ -577,6 +579,7 @@ func (a *App) inspectCommand() *cli.Command {
 			if err != nil {
 				return err
 			}
+			extra = append(extra, a.offlineOption(cmd)...)
 			client, err := a.client(cmd, extra...)
 			if err != nil {
 				return err

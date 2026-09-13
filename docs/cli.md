@@ -206,7 +206,8 @@ Rules:
   exit code.
 - `--offline` prohibits network access and requires a local OCI layout plus
   local trust material.
-- `--trust-root PATH` may be repeated and reads protected local trust material.
+- `--trust-root PATH` reads protected local trust material. It takes one path;
+  use `--key` (repeatable) for bare public keys.
 
 Text output separates integrity, trust, and semantic results. JSON output uses
 stable field names and finding codes. Quiet output is the resolved subject

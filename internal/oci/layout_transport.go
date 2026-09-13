@@ -57,6 +57,13 @@ func NewLayoutTransport() *LayoutTransport {
 // Scheme is the reference scheme this transport handles.
 func (t *LayoutTransport) Scheme() string { return artifact.SchemeLayout }
 
+// LocalOnly reports that this transport never opens a network connection.
+//
+// An OCI image layout is a directory. Every operation here is a file
+// operation against it, so an offline client can use this transport and only
+// this one (DP-013).
+func (t *LayoutTransport) LocalOnly() bool { return true }
+
 // layout opens the layout a reference names, creating it when create is set.
 func (t *LayoutTransport) layout(ref artifact.Reference, create bool) (*Layout, error) {
 	if ref.Scheme != artifact.SchemeLayout {

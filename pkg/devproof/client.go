@@ -51,6 +51,7 @@ type Client struct {
 	verifier   evidence.Verifier
 	trustRoots [][]byte
 	clock      func() time.Time
+	offline    bool
 	closed     bool
 }
 
@@ -258,6 +259,26 @@ func WithClock(clock func() time.Time) Option {
 func WithTempRoot(dir string) Option {
 	return func(c *Client) error {
 		c.tempRoot = dir
+		return nil
+	}
+}
+
+// WithOffline refuses every operation that would use the network.
+//
+// It is a capability boundary rather than a preference: a transport that has
+// not promised to stay local is rejected when it is selected, before a
+// reference is resolved or a byte is fetched. A flag that merely expressed an
+// intention would be worse than none, because the situations where offline
+// matters -- an air gap, an incident, a machine that must not phone home --
+// are exactly the ones where nobody is watching for an unexpected connection.
+//
+// Evidence verification must also be offline: supply a trusted root with
+// WithSigstore, or a key with WithVerifier. Without one, verification would
+// fetch the public Sigstore root over TUF, and this option cannot reach inside
+// an attester or verifier an application supplied.
+func WithOffline() Option {
+	return func(c *Client) error {
+		c.offline = true
 		return nil
 	}
 }
