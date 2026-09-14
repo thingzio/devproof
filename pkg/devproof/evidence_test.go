@@ -628,3 +628,61 @@ func TestEvidenceSurvivesAGenericIndexRewrite(t *testing.T) {
 			report.Findings)
 	}
 }
+
+// TestCopyCarriesEvidence closes a gap between the format specification and
+// what copy did.
+//
+// docs/bundle-format.md requires a copy to preserve subject and evidence
+// digests. Copy moved the payload and nothing else, so evidence attached at
+// the source simply was not at the destination -- and a policy requiring a
+// signature, applied to the copy, failed for a reason that had nothing to do
+// with the artifact. That is the registry-to-air-gap path, which is the one
+// case where re-attaching at the far side is not possible.
+func TestCopyCarriesEvidence(t *testing.T) {
+	t.Parallel()
+
+	client, key := signingClient(t)
+	origin := filepath.Join(t.TempDir(), "origin")
+	built := buildSigned(t, client, origin)
+
+	mirror := filepath.Join(t.TempDir(), "mirror")
+	copied, err := client.Copy(t.Context(), devproof.CopyRequest{
+		Source:      "oci-layout://" + origin + "@" + built.SubjectDigest,
+		Destination: "oci-layout://" + mirror,
+		Tag:         "v1",
+	})
+	if err != nil {
+		t.Fatalf("Copy: %v", err)
+	}
+	if copied.SubjectDigest != built.SubjectDigest {
+		t.Fatalf("copying changed the subject digest")
+	}
+	if copied.EvidenceCount != 1 {
+		t.Errorf("copy reported %d evidence objects, want 1", copied.EvidenceCount)
+	}
+
+	// The policy is the assertion. Requiring a signature at the destination
+	// is what the air-gapped consumer actually does, and it is what failed.
+	doc := policyDoc("requires-a-signature", func(d *policy.Document) {
+		d.Spec.Signatures = policy.SignatureRules{
+			Threshold:  1,
+			Identities: []policy.IdentityRule{{KeyID: keyIDOf(t, key)}},
+		}
+		d.Spec.Provenance = policy.ProvenanceRules{Required: true}
+	})
+
+	report, err := client.Verify(t.Context(), devproof.VerifyRequest{
+		Reference: "oci-layout://" + mirror + "@" + built.SubjectDigest,
+		Policy:    doc,
+	})
+	if err != nil {
+		t.Fatalf("verifying the copy: %v", err)
+	}
+	if report.Trust != policy.StatusPass {
+		t.Errorf("the copy does not satisfy a signature policy: %v", report.Findings)
+	}
+	if len(report.AcceptedEvidence) != 1 {
+		t.Errorf("the copy carries %d accepted evidence objects, want 1",
+			len(report.AcceptedEvidence))
+	}
+}

@@ -331,9 +331,17 @@ The subject digest is unchanged by definition: identity is a function of
 content and format version, and a repository name is neither (DP-002).
 `--require-digest` rejects a source tag before anything is fetched.
 
-Evidence is not copied. A copy carries the payload only, so evidence attached
-at the source has to be re-attached at the destination — see
-[the roadmap](roadmap.md).
+Evidence moves with the subject. Every referrer is carried, not only DevProof's
+own, because a mirror that silently dropped what it did not recognize would
+leave a gap nobody could see. The evidence blob is transferred byte for byte,
+which is what preserves the signature; the referrer manifest is rebuilt at the
+destination, since a layout and a registry record it differently.
+
+A destination that cannot hold referrers is an error rather than a silent
+partial copy. An export for an air gap has one chance to carry the signature
+across, and finding out afterwards is finding out too late.
+
+`CopyResult.EvidenceCount` reports how many objects travelled.
 
 ## `devproof version`
 

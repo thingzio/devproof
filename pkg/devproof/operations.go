@@ -20,6 +20,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -1054,6 +1055,12 @@ type CopyResult struct {
 	Source        string
 	Destination   string
 	Tag           string
+	// EvidenceCount is how many evidence objects moved with the subject.
+	//
+	// Reported rather than assumed: a destination that cannot hold referrers
+	// copies zero, and a caller that is building an air-gapped mirror needs to
+	// know that before the network is gone.
+	EvidenceCount int
 }
 
 // Copy moves a subject between registries, layouts, or repositories.
@@ -1064,8 +1071,9 @@ type CopyResult struct {
 //
 // The subject digest is unchanged by definition: identity is a function of
 // content and format version, and a repository name is neither (DP-002).
-// Evidence is not copied here; that arrives with the referrer work in phase 4,
-// and until then a copy carries the payload only.
+// Evidence moves with the subject. The format requires a copy to preserve
+// subject and evidence digests, and for a registry-to-air-gap export there is
+// no second chance to attach it: the far side has no path back to the signer.
 func (c *Client) Copy(ctx context.Context, req CopyRequest) (_ *CopyResult, retErr error) {
 	if err := c.checkOpen(); err != nil {
 		return nil, err
@@ -1145,16 +1153,144 @@ func (c *Client) Copy(ctx context.Context, req CopyRequest) (_ *CopyResult, retE
 		return nil, err
 	}
 
+	// After the subject, never before. Evidence names a subject by digest, so
+	// attaching it to a destination that does not yet hold that subject would
+	// publish a dangling reference.
+	carried, err := c.copyEvidence(ctx, sourceTransport, pinned,
+		destinationTransport, destination, subject, limits.Limits)
+	if err != nil {
+		return nil, err
+	}
+
 	c.logger.InfoContext(ctx, "copied bundle",
 		"subject", subject.ManifestDigest.String(),
-		"from", pinned.String(), "to", published.String())
+		"from", pinned.String(), "to", published.String(),
+		"evidence", carried)
 
 	return &CopyResult{
 		SubjectDigest: subject.ManifestDigest.String(),
 		Source:        pinned.String(),
 		Destination:   published.String(),
 		Tag:           tag,
+		EvidenceCount: carried,
 	}, nil
+}
+
+// copyEvidence transfers every referrer attached to a subject.
+//
+// The evidence blob is moved byte for byte, which is what preserves the
+// signature: a DSSE envelope is signed over its own payload, so re-encoding
+// the referrer manifest that points at it changes nothing a verifier checks.
+// The manifest is rebuilt at the destination rather than copied verbatim
+// because the destination has to record it in its own index, and a layout and
+// a registry do that differently.
+//
+// Every artifact type is carried, not only DevProof's own. A subject may have
+// an SBOM or a third-party attestation attached, and a mirror that silently
+// dropped everything it did not recognize would be worse than one that
+// dropped everything: the gap would be invisible.
+func (c *Client) copyEvidence(
+	ctx context.Context,
+	sourceTransport artifact.Transport,
+	source artifact.Reference,
+	destinationTransport artifact.Transport,
+	destination artifact.Reference,
+	subject *canonical.Subject,
+	limits bundle.Limits,
+) (int, error) {
+
+	from, ok := sourceTransport.(artifact.ReferrerTransport)
+	if !ok {
+		return 0, nil
+	}
+	to, ok := destinationTransport.(artifact.ReferrerTransport)
+	if !ok {
+		// Refused rather than silently dropped. A caller exporting for an air
+		// gap has one chance to carry the signature across, and discovering
+		// afterwards that it did not travel is discovering it too late.
+		return 0, fault.New(fault.CodeInvalidInput, "copy",
+			"the source has evidence and the destination cannot hold referrers")
+	}
+
+	descriptor := subject.Descriptor()
+	referrers, _, err := from.Referrers(ctx, source, descriptor, "")
+	if err != nil {
+		return 0, err
+	}
+	if limit := limits.MaxReferrers; limit > 0 && int64(len(referrers)) > limit {
+		return 0, fault.New(fault.CodeLimitExceeded, "copy",
+			fmt.Sprintf("subject has %d referrers, the limit is %d", len(referrers), limit))
+	}
+
+	var carried int
+	for _, referrer := range referrers {
+		manifest, err := c.fetchReferrerManifest(ctx, from, source, referrer, limits)
+		if err != nil {
+			return carried, err
+		}
+		if len(manifest.Layers) != 1 {
+			return carried, fault.New(fault.CodeInvalidArtifact, "copy",
+				fmt.Sprintf("referrer %s carries %d layers, want exactly 1",
+					referrer.Digest, len(manifest.Layers)))
+		}
+		blob := manifest.Layers[0]
+		if limit := limits.MaxEvidenceBytes; limit > 0 && blob.Size > limit {
+			return carried, fault.New(fault.CodeLimitExceeded, "copy",
+				fmt.Sprintf("evidence is %d bytes, the limit is %d", blob.Size, limit))
+		}
+
+		content, err := from.Fetch(ctx, source, blob)
+		if err != nil {
+			return carried, err
+		}
+		_, _, attachErr := to.Attach(ctx, destination, descriptor, blob, content,
+			manifest.ArtifactType)
+		if closeErr := content.Close(); closeErr != nil && attachErr == nil {
+			attachErr = fault.Wrap(fault.CodeInternal, "copy",
+				"closing the fetched evidence", closeErr)
+		}
+		if attachErr != nil {
+			return carried, attachErr
+		}
+		carried++
+	}
+	return carried, nil
+}
+
+// fetchReferrerManifest reads and validates one referrer manifest.
+func (c *Client) fetchReferrerManifest(
+	ctx context.Context,
+	from artifact.ReferrerTransport,
+	source artifact.Reference,
+	referrer artifact.Descriptor,
+	limits bundle.Limits,
+) (*artifact.ReferrerManifest, error) {
+
+	if limit := limits.MaxManifestBytes; limit > 0 && referrer.Size > limit {
+		return nil, fault.New(fault.CodeLimitExceeded, "copy",
+			fmt.Sprintf("referrer manifest is %d bytes, the limit is %d", referrer.Size, limit))
+	}
+
+	reader, err := from.Fetch(ctx, source, referrer)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = reader.Close() }()
+
+	raw, err := io.ReadAll(io.LimitReader(reader, limits.MaxManifestBytes+1))
+	if err != nil {
+		return nil, fault.Wrap(fault.CodeTransport, "copy", "reading a referrer manifest", err)
+	}
+
+	var manifest artifact.ReferrerManifest
+	if err := json.Unmarshal(raw, &manifest); err != nil {
+		return nil, fault.Wrap(fault.CodeInvalidArtifact, "copy",
+			"decoding a referrer manifest", err)
+	}
+	if err := manifest.Validate(); err != nil {
+		return nil, err
+	}
+	return &manifest, nil
 }
 
 // limitRecords turns resolved limits into what a report carries.

@@ -10,9 +10,6 @@ why the codebase is shaped the way it is.
 
 Known outstanding against the criteria above:
 
-- **Phase 4.** Evidence is not copied with its subject. A `copy` carries the
-  payload only, so evidence attached at the source has to be re-attached at
-  the destination or it is simply gone.
 - **Phase 0.** The provenance predicate has no published schema. Manifest,
   lock, config, policy, and the proof report do.
 - **Phase 6.** A second independent read implementation in another language
@@ -24,8 +21,10 @@ Known outstanding against the criteria above:
 That list is the real roadmap. Writing "delivered" against phases whose exit
 criteria are unmet is how a roadmap stops being useful.
 
-Closed since this list was first written: standalone `verify` now fetches and
-hashes the payload, so a subject whose layer is absent or altered fails rather
+Closed since this list was first written: evidence now moves with its subject
+through `copy`, which is the registry-to-air-gap path and the one case with no
+second chance to attach it; standalone `verify` now fetches and hashes the
+payload, so a subject whose layer is absent or altered fails rather
 than reporting `integrity: pass`; a policy-gated `expand` returns the report it
 evaluated rather than a fresh one claiming `trust: not-evaluated`; `--offline`
 refuses a transport that can open a connection rather than checking a flag;
