@@ -313,3 +313,33 @@ func TestNonPositiveTimeoutIsRejected(t *testing.T) {
 		})
 	}
 }
+
+// TestKeyAndTrustRootAreMutuallyExclusive covers trust configuration that was
+// accepted and then discarded.
+//
+// --key and --trust-root select two different trust models: bare public keys,
+// and a Sigstore trusted root for certificate-based identities. The key branch
+// returned before the trust root was ever read, so supplying both silently
+// verified against the keys alone. An operator who believed they had pinned a
+// trust root had pinned nothing, and nothing said so.
+//
+// The two do not compose underneath either -- both install one verifier on the
+// client, so applying both would replace rather than combine. Refusing the
+// combination says that out loud instead of picking a winner.
+func TestKeyAndTrustRootAreMutuallyExclusive(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	key := filepath.Join(dir, "signer.pub.pem")
+	if err := os.WriteFile(key, []byte("-----BEGIN PUBLIC KEY-----\n"), 0o600); err != nil {
+		t.Fatalf("writing the key: %v", err)
+	}
+
+	got := run(t, "verify", "oci-layout://"+dir, "--key", key, "--trust-root", key)
+	if got.code != fault.ExitUsage {
+		t.Errorf("exit = %d, want %d: %s", got.code, fault.ExitUsage, got.stderr)
+	}
+	if !strings.Contains(got.stderr, "trust-root") {
+		t.Errorf("the error does not name the ignored setting: %q", got.stderr)
+	}
+}

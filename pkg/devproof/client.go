@@ -19,6 +19,7 @@ package devproof
 import (
 	"context"
 	stderrors "errors"
+	"fmt"
 	"log/slog"
 	"sync/atomic"
 	"time"
@@ -53,8 +54,11 @@ type Client struct {
 	attester   evidence.Attester
 	verifier   evidence.Verifier
 	trustRoots [][]byte
-	clock      func() time.Time
-	offline    bool
+	// verifierSource names the option that installed verifier, so a second
+	// one can be refused rather than silently replacing it.
+	verifierSource string
+	clock          func() time.Time
+	offline        bool
 	// closed is atomic because Close may be called while an operation is in
 	// flight, and the type documents itself as safe for concurrent use. An
 	// ordinary bool made that claim false under the race detector for exactly
@@ -195,10 +199,32 @@ func WithInsecureRegistry(provider artifact.CredentialProvider) Option {
 // has an OIDC token it needs no configuration at all.
 func WithSigstore(opts evidence.SigstoreOptions) Option {
 	return func(c *Client) error {
+		if err := c.claimVerifier("Sigstore"); err != nil {
+			return err
+		}
 		c.attester = evidence.NewSigstoreAttester(opts)
 		c.verifier = evidence.NewSigstoreVerifier(opts)
 		return nil
 	}
+}
+
+// claimVerifier records which option installed the client's verifier.
+//
+// A client has one, so a second option would replace the first rather than add
+// to it -- and an application that configured a Sigstore trusted root and then
+// registered a key verifier would get the keys alone, with nothing reporting
+// that the trusted root was no longer in use. Replacing what a client will
+// believe is not something to do quietly, so the second one is an error naming
+// both.
+func (c *Client) claimVerifier(name string) error {
+	if c.verifierSource != "" {
+		return fault.New(fault.CodeInvalidInput, clientOp,
+			fmt.Sprintf("a %s verifier was already configured, and a %s verifier "+
+				"would replace it rather than add to it; a client verifies one way",
+				c.verifierSource, name))
+	}
+	c.verifierSource = name
+	return nil
 }
 
 // WithAttester registers the implementation that signs evidence.
@@ -221,6 +247,9 @@ func WithVerifier(verifier evidence.Verifier) Option {
 	return func(c *Client) error {
 		if verifier == nil {
 			return fault.New(fault.CodeInvalidInput, clientOp, "verifier must not be nil")
+		}
+		if err := c.claimVerifier("supplied"); err != nil {
+			return err
 		}
 		c.verifier = verifier
 		return nil

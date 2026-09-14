@@ -148,7 +148,7 @@ func TestWalkthroughRuns(t *testing.T) {
 
 	// Step 5: offline refuses a network reference rather than attempting it.
 	output, err = run("verify", "oci://registry.example.com/stacks/gb200:1.3.10",
-		"--offline", "--trust-root", "signer.pub.pem")
+		"--offline", "--key", "signer.pub.pem")
 	if err == nil {
 		t.Error("an offline client accepted a registry reference")
 	}

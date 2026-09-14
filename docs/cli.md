@@ -216,9 +216,14 @@ Rules:
 - With a policy, failure of any required trust rule returns the policy-failure
   exit code.
 - `--offline` prohibits network access and requires a local OCI layout plus
-  local trust material.
-- `--trust-root PATH` reads protected local trust material. It takes one path;
-  use `--key` (repeatable) for bare public keys.
+  local trust material. A `--key` is local trust material, so it satisfies this
+  on its own.
+- `--trust-root PATH` reads a Sigstore trusted root, for certificate-based
+  identities. It takes one path; use `--key` (repeatable) for bare public keys.
+- `--key` and `--trust-root` select different trust models and **cannot be
+  combined**. They do not compose underneath — each installs one verifier — so
+  supplying both used to accept the trust root and then discard it, leaving an
+  operator who believed they had pinned one having pinned nothing.
 
 Text output separates integrity, trust, and semantic results. JSON output uses
 stable field names and finding codes. Quiet output is the resolved subject

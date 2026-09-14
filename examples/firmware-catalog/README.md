@@ -262,7 +262,7 @@ release:
 GPU=catalog/gb200-nvl72-1.3.10/hmc/gpu.yaml
 
 # The original is kept beside the catalog rather than inside it. A .bak file
-# left in the tree would be a thirty-eighth component, and the digest below
+# left in the tree would be a forty-eighth file, and the digest below
 # would change for the wrong reason.
 cp "$GPU" gpu.yaml.orig
 sed 's/97.00.B9.00.CD/97.10.4A.00.32/' gpu.yaml.orig > "$GPU"
@@ -298,9 +298,12 @@ Rack firmware lives behind an air gap. `--offline` is a capability boundary,
 not a preference: a transport that has not promised to stay local is rejected
 when it is selected, before a reference is resolved or a byte is fetched.
 
+A public key *is* local trust material, so `--key` is all this needs.
+`--trust-root` is for the other trust model — a Sigstore trusted root, for
+certificate-based identities — and the two cannot be combined.
+
 ```bash
-devproof verify "$REF" \
-  --policy trust.yaml --key signer.pub.pem --offline --trust-root signer.pub.pem
+devproof verify "$REF" --policy trust.yaml --key signer.pub.pem --offline
 ```
 
 ```console
@@ -313,7 +316,7 @@ registry reference and it refuses before touching the network at all:
 
 ```bash
 devproof verify oci://registry.example.com/stacks/gb200:1.3.10 \
-  --offline --trust-root signer.pub.pem
+  --key signer.pub.pem --offline
 ```
 
 ```console

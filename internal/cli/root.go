@@ -475,7 +475,23 @@ func (a *App) signingOptions(cmd *cli.Command) ([]devproof.Option, error) {
 func (a *App) verificationOptions(cmd *cli.Command) ([]devproof.Option, error) {
 	var opts []devproof.Option
 
-	if keys := cmd.StringSlice("key"); len(keys) > 0 {
+	keys := cmd.StringSlice("key")
+	root := a.setting(cmd, "trust-root", a.config.TrustRoot)
+
+	// Two trust models, not two halves of one. --key pins bare public keys;
+	// --trust-root pins a Sigstore trusted root for certificate-based
+	// identities. They do not compose underneath -- each installs one verifier
+	// on the client, so applying both replaces rather than combines -- and the
+	// key branch below used to return before the trust root was read, which
+	// accepted the setting and discarded it. An operator who believed they had
+	// pinned a trust root had pinned nothing.
+	if len(keys) > 0 && root != "" {
+		return nil, usageError("--key and --trust-root select different trust models " +
+			"and cannot be combined; use --key for bare public keys, or --trust-root " +
+			"for Sigstore identities")
+	}
+
+	if len(keys) > 0 {
 		var publicKeys []crypto.PublicKey
 		for _, path := range keys {
 			data, err := os.ReadFile(path) //nolint:gosec // operator-supplied key path
@@ -496,7 +512,6 @@ func (a *App) verificationOptions(cmd *cli.Command) ([]devproof.Option, error) {
 	}
 
 	sigstoreOpts := evidence.SigstoreOptions{}
-	root := a.setting(cmd, "trust-root", a.config.TrustRoot)
 	a.reportSetting(cmd, "trust root", "trust-root", root, a.config.TrustRoot != "")
 	if root != "" {
 		data, err := os.ReadFile(root) //nolint:gosec // operator-supplied trust root
