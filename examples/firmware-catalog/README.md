@@ -115,8 +115,8 @@ devproof diff ./catalog/gb200-nvl72-1.3.10 ./catalog/gb300-nvl72-1.0.10
 
 ```console
 added:           21
-removed:         8
-modified:        31
+removed:         7
+modified:        32
 
 ~ SOURCE.yaml
 ~ bmc-fpga-erot/bmc.yaml
@@ -132,6 +132,7 @@ modified:        31
 ~ hmc/gpu.yaml
 ~ hmc/sbios.yaml
 - host-software-components/cx7.yaml
+~ nvos/bundle-version.yaml
 + nvos/sm.yaml
 + powershelf-fw/liteon-psu.yaml
 - powershelf-fw/powershelf-psc.yaml
@@ -155,6 +156,15 @@ The changes are real and they have shapes worth noticing:
 - **Structural** — GB200 lists one concatenated CPLD string; GB300 lists three.
   GB200 has one power shelf vendor; GB300 has Delta and LiteON. The *shape*
   changed, not just the numbers.
+
+A note on how this list is only as good as the extraction behind it. NVOS
+reports its own version as `25.02.2579` on the GB200 page and `25.02.4354` on
+the GB300 page, but the two pages mark it up differently — a line-block on one,
+a bare paragraph on the other — and an earlier version of `regenerate.py` read
+only the first. The diff then reported the NVOS bundle version as **removed**
+in GB300, which is a confident wrong answer rather than a gap: GB300 has one.
+`regenerate.py` now runs an audit that shares no code with its own parser,
+because a check built on the parser cannot see what the parser is blind to.
 
 One honest artifact of inventory-level comparison: `cuda-toolkit.yaml` →
 `cuda.yaml` and `bf3-bfb.yaml` → `bf3.yaml` appear as a removal plus an
@@ -362,6 +372,14 @@ python3 regenerate.py --check   # compare without writing
 is the honest way to discover that a snapshot has aged. It is deliberately not
 run in CI: a test suite that reached `docs.nvidia.com` would fail for reasons
 that have nothing to do with this repository.
+
+Both modes also run an audit that shares no code with the parser. The parser
+walks the document's structure, and every omission so far has been a container
+it did not walk — a value in a table, then one in a line-block, then one in a
+bare paragraph. A comparison built on that parser cannot see what the parser is
+blind to, so `--check` reported a clean catalog while a version was missing
+from it. The audit reads the page flat instead, finds bolded labels and table
+cells wherever they occur, and asks only whether each value reached a file.
 
 ## Next
 

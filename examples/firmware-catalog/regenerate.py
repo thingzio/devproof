@@ -96,10 +96,24 @@ def sections(page: str):
     heading = "root"
     pattern = (r"(<h[1-6][^>]*>.*?</h[1-6]>"
                r"|<table.*?</table>"
-               r'|<div class="line-block">.*?</div>\s*</div>)')
+               r'|<div class="line-block">.*?</div>\s*</div>'
+               r"|<p>\s*<strong>.*?</strong>.*?</p>)")
     for part in re.findall(pattern, page, re.S):
         if part.startswith("<h"):
             heading = strip_tags(part).rstrip("#").strip()
+        elif part.startswith("<p"):
+            # A third container for the same kind of value. GB300 renders the
+            # NVOS version as a bare paragraph rather than a table row or a
+            # line-block, and reading only the first two dropped it.
+            #
+            # Adding a third case is not what makes this correct -- it is the
+            # third time this has been the fix. What makes it correct is the
+            # audit below, which does not use this function at all.
+            label = re.search(r"<strong>(.*?)</strong>", part, re.S)
+            value = strip_tags(re.sub(r"<strong>.*?</strong>\s*:?", "", part,
+                                      count=1, flags=re.S))
+            if label and value:
+                yield "lines", heading, [(strip_tags(label.group(1)), value)]
         elif part.startswith("<table"):
             rows = []
             for row in re.findall(r"<tr.*?</tr>", part, re.S):
@@ -119,6 +133,48 @@ def sections(page: str):
                     pairs.append((strip_tags(label.group(1)), value))
             if pairs:
                 yield "lines", heading, pairs
+
+
+def audit(page: str, written: dict[str, str]) -> list[str]:
+    """Report values on the page that no generated file carries.
+
+    This deliberately shares no code with sections() or entries(). Those walk
+    the document structure, and every omission so far has been a container they
+    did not walk: a value in a table, then one in a line-block, then one in a
+    bare paragraph. A check built on the same walker cannot see the thing the
+    walker is blind to, which is why --check reported a clean catalog while a
+    version was missing from it.
+
+    So this reads the page flat instead. It finds the two shapes a value can
+    take -- a bolded label followed by text, and a table row's last cell --
+    without caring what encloses either, and asks only whether the value
+    reached the catalog.
+    """
+    missing: list[str] = []
+    heading = "root"
+
+    def record(where: str, value: str) -> None:
+        if value and value not in written:
+            missing.append(f"{where}: {value!r}")
+
+    for part in re.findall(r"(<h[1-6][^>]*>.*?</h[1-6]>|<strong>.*?</strong>[^<]*"
+                           r"|<tr.*?</tr>)", page, re.S):
+        if part.startswith("<h"):
+            heading = strip_tags(part).rstrip("#").strip()
+            continue
+        if heading in SKIP_SECTIONS:
+            continue
+        if part.startswith("<strong>"):
+            value = strip_tags(re.sub(r"<strong>.*?</strong>\s*:?", "", part,
+                                      count=1, flags=re.S))
+            record(heading, value)
+            continue
+        cells = [strip_tags(c) for c in re.findall(r"<t[hd].*?</t[hd]>", part, re.S)]
+        # A header row names columns rather than carrying a value.
+        if len(cells) >= 2 and cells[-1].lower() not in {"version", "filename"}:
+            record(heading, cells[-1])
+
+    return missing
 
 
 def entries(page: str):
@@ -183,9 +239,12 @@ def yaml_quote(value: str) -> str:
     return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
-def write_catalog(source: dict, page: str, into: pathlib.Path, retrieved: str) -> int:
+def write_catalog(source: dict, page: str, into: pathlib.Path,
+                  retrieved: str) -> tuple[int, dict[str, str]]:
     count = 0
+    written: dict[str, str] = {}
     for entry in entries(page):
+        written[entry["value"]] = entry["name"]
         directory = into / slug(entry["section"])
         directory.mkdir(parents=True, exist_ok=True)
         path = directory / f"{entry['key']}.yaml"
@@ -220,7 +279,7 @@ def write_catalog(source: dict, page: str, into: pathlib.Path, retrieved: str) -
         f"url: {yaml_quote(source['url'])}\n",
         encoding="utf-8",
     )
-    return count
+    return count, written
 
 
 def main() -> None:
@@ -236,12 +295,22 @@ def main() -> None:
         shutil.rmtree(CATALOG)
 
     total = 0
+    missed = 0
     for source in SOURCES:
         page = fetch(source["url"])
         into = target / f"{source['slug']}-{source['release']}"
-        written = write_catalog(source, page, into, retrieved)
-        print(f"{source['slug']}: {written} components")
-        total += written
+        count, values = write_catalog(source, page, into, retrieved)
+        print(f"{source['slug']}: {count} components")
+        total += count
+
+        # Run on every invocation, not only on --check. A catalog that is
+        # missing a value the page carries is wrong whether or not anybody
+        # asked for a comparison.
+        gaps = audit(page, values)
+        if gaps:
+            for gap in gaps:
+                print(f"  MISSING from {source['slug']}: {gap}", file=sys.stderr)
+            missed += len(gaps)
 
     if args.check:
         # A straight comparison: the catalog is a pure function of the pages,
@@ -258,6 +327,9 @@ def main() -> None:
             sys.exit("the published pages no longer match the committed catalog")
         print("committed catalog matches the published pages")
     print(f"total: {total} components")
+
+    if missed:
+        sys.exit(f"{missed} value(s) on the published pages reached no catalog file")
 
 
 if __name__ == "__main__":
