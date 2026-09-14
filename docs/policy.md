@@ -127,14 +127,23 @@ at policy-load time and operate on normalized complete identity strings.
 
 Provenance policy may require:
 
-- one or more accepted predicate types;
-- an authenticated builder identity;
-- a matching manifest digest and lock digest;
-- an accepted DevProof and resolver version range;
-- allowed source types or hosts;
-- immutable source resolutions;
-- matching per-source tree digests; and
-- absence of unapproved source types.
+- one or more accepted predicate types (`predicateTypes`);
+- an authenticated builder identity (`allowedBuilders`);
+- that provenance records a lock digest at all (`requireLockDigest`);
+- allowed source types or hosts (`allowedTypes`, `allowedHosts`); and
+- immutable source resolutions (`requireImmutableResolution`).
+
+Those are the rules that exist. Three that this document previously listed do
+not: pinning an **expected** manifest or lock digest rather than requiring the
+presence of one, and constraining a DevProof or resolver version range.
+`requireLockDigest` demands a syntactically valid digest, not a match against a
+value the policy names. Per-source tree digests are cross-checked against what
+verification established rather than against a policy-supplied expectation.
+
+Expected-value rules are a reasonable thing to want — they are how a policy
+says "this exact qualified build" rather than "some build" — and they are
+proposed rather than shipped. Until they exist, pin the subject by digest and
+let the tree-digest cross-check do the rest.
 
 Claims are cross-checked against what verification established. Provenance
 naming a tree digest or bundle format other than the subject's own is a

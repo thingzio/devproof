@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as _dt
+import hashlib
 import html
 import pathlib
 import re
@@ -296,8 +297,20 @@ def main() -> None:
 
     total = 0
     missed = 0
+    digests: list[tuple[str, str]] = []
     for source in SOURCES:
         page = fetch(source["url"])
+
+        # Reported, not written into the catalog.
+        #
+        # Binding the transcription to the bytes it came from is worth doing,
+        # and putting the digest inside SOURCE.yaml is the wrong way: it would
+        # reach the subject digest, so an unrelated edit to the page's footer
+        # or navigation would rename a stack whose firmware versions did not
+        # move. Record it beside the snapshot date instead, in the README that
+        # nobody signs.
+        digests.append((source["slug"],
+                        "sha256:" + hashlib.sha256(page.encode("utf-8")).hexdigest()))
         into = target / f"{source['slug']}-{source['release']}"
         count, values = write_catalog(source, page, into, retrieved)
         print(f"{source['slug']}: {count} components")
@@ -327,6 +340,10 @@ def main() -> None:
             sys.exit("the published pages no longer match the committed catalog")
         print("committed catalog matches the published pages")
     print(f"total: {total} components")
+
+    print(f"retrieved: {retrieved}")
+    for slug_name, digest in digests:
+        print(f"  {slug_name}: {digest}")
 
     if missed:
         sys.exit(f"{missed} value(s) on the published pages reached no catalog file")

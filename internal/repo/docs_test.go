@@ -250,3 +250,71 @@ func declaredTypes(root string) (map[string]bool, error) {
 	})
 	return declared, err
 }
+
+// TestDocumentedPolicyFieldsExist catches the policy reference naming a rule
+// that no policy can express.
+//
+// This is the failure mode with the longest history here: the reference once
+// documented sources.allowedSchemes, a field SourceRules has never had, and
+// later promised an expected manifest digest, an expected lock digest, and a
+// resolver version range against a type carrying none of them. A reader writes
+// the rule, the strict decoder rejects it, and the document is what they stop
+// trusting.
+//
+// Backticked identifiers only. Prose that describes a capability without
+// naming a field is beyond a mechanical check, which is exactly why the
+// reference should name the field.
+func TestDocumentedPolicyFieldsExist(t *testing.T) {
+	t.Parallel()
+
+	root := repo.Root()
+	doc, err := os.ReadFile(filepath.Join(root, "docs", "policy.md"))
+	if err != nil {
+		t.Fatalf("reading the policy reference: %v", err)
+	}
+	schemaBytes, err := os.ReadFile(
+		filepath.Join(root, "schemas", "verification-policy.v1alpha1.schema.json"))
+	if err != nil {
+		t.Fatalf("reading the policy schema: %v", err)
+	}
+
+	// Every property name the schema defines, at any depth.
+	declared := map[string]bool{}
+	property := regexp.MustCompile(`"([a-z][a-zA-Z0-9]*)":\s*\{`)
+	for _, match := range property.FindAllStringSubmatch(string(schemaBytes), -1) {
+		declared[match[1]] = true
+	}
+
+	// Words that are commands, statuses, or finding codes rather than fields.
+	ignore := map[string]bool{
+		"verify": true, "expand": true, "build": true, "diff": true,
+		"inspect": true, "lock": true, "init": true, "copy": true,
+		"pass": true, "fail": true,
+	}
+
+	var checked int
+	field := regexp.MustCompile("`([a-z][a-zA-Z0-9]*(?:\\.[a-zA-Z0-9]+)*)`")
+	for _, match := range field.FindAllStringSubmatch(string(doc), -1) {
+		path := match[1]
+		leaf := path
+		if i := strings.LastIndex(path, "."); i >= 0 {
+			leaf = path[i+1:]
+		}
+		if ignore[leaf] || strings.Contains(path, "-") {
+			continue
+		}
+		// A bare lowercase word may be prose; a dotted path is a field claim,
+		// and so is any word the schema would be expected to define.
+		if !strings.Contains(path, ".") && !declared[leaf] {
+			continue
+		}
+
+		checked++
+		if !declared[leaf] {
+			t.Errorf("docs/policy.md names the policy field %q, which the schema does not define", path)
+		}
+	}
+	if checked == 0 {
+		t.Error("no policy fields were checked; the pattern has stopped matching")
+	}
+}

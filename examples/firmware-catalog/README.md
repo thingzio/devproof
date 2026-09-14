@@ -57,6 +57,23 @@ versions. It does not carry package bytes, NVIDIA's package signatures, or
 CoRIM measurements, and it says nothing about a device's secure-boot or
 runtime state.
 
+**The signature covers the transcription, not its derivation.** A key signs
+these catalog bytes. Nothing in the signed subject binds them to the pages they
+were read from, so "somebody transcribed NVIDIA's pages correctly" is a claim
+this artifact cannot make about itself — only "these are the bytes that were
+signed". `regenerate.py` prints the SHA-256 of each page it fetched, and the
+snapshot below records them, so a reader can at least check which bytes the
+transcription came from. Those digests are deliberately *outside* the signed
+subject: a page's footer changing would otherwise rename a stack whose firmware
+versions did not move.
+
+Snapshot of 2026-09-13:
+
+```text
+gb200-nvl72  sha256:798706279e3312cd917d04476b04bd5ee321f45dba4c5eb3d1f56f35c1223424
+gb300-nvl72  sha256:a1da3590fd4a1fab9745c44dd7a56f24f5667a950783d017c032e15f123ee3ec
+```
+
 ## Before you start
 
 You need `devproof` **v0.2.0 or newer** (`devproof version`), `python3`, and
@@ -356,6 +373,7 @@ And what it does not show, restated because a passing result is persuasive:
 | A key you configured signed them | That NVIDIA signed or approved anything |
 | Which components differ between catalogs | That either catalog is complete or correct |
 | Verification with no network | Device secure boot, CoRIM or SPDM attestation |
+| The bytes somebody signed | That they were transcribed from NVIDIA's pages |
 
 The packages themselves are signed by the people who built them, and that is
 the right place for it. This verifies a claim about which versions belong
