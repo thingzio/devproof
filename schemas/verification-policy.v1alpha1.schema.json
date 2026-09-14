@@ -166,7 +166,7 @@
         "allowedHosts": {
           "type": "array",
           "items": { "type": "string", "minLength": 1 },
-          "description": "Permitted hosts for remote sources."
+          "description": "Permitted hosts for sources. Applies to every source, not only to the ones that name a host: a source recording no usable host -- no URL, an unparseable one, or one with no host component such as a file: URL -- cannot satisfy the rule and is refused. A local path source names no host either, so use allowedTypes to permit one."
         },
         "requireImmutableResolution": {
           "type": "boolean",

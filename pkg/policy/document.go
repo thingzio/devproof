@@ -126,7 +126,19 @@ type ProvenanceRules struct {
 type SourceRules struct {
 	// AllowedTypes restricts source types, such as "git" or "path".
 	AllowedTypes []string `json:"allowedTypes,omitempty" yaml:"allowedTypes,omitempty"`
-	// AllowedHosts restricts the hosts remote sources may come from.
+	// AllowedHosts restricts the hosts sources may come from.
+	//
+	// It applies to every source, not only to the ones that happen to name a
+	// host. A source recording no usable host -- no URL, an unparseable one,
+	// or one with no host component such as a file: URL -- cannot satisfy the
+	// rule and is refused. A predicate is written by whoever signed it, so a
+	// rule that only applied to statements volunteering enough detail to be
+	// checked would be no rule at all.
+	//
+	// A consequence worth knowing before setting it: a local path source names
+	// no host either, so a policy that restricts hosts will refuse one. If
+	// local sources are acceptable, say which types are acceptable with
+	// AllowedTypes rather than leaving the host rule to decide.
 	AllowedHosts []string `json:"allowedHosts,omitempty" yaml:"allowedHosts,omitempty"`
 	// RequireImmutableResolution demands that every source resolved to
 	// something immutable.

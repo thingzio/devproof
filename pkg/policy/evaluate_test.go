@@ -372,3 +372,88 @@ func TestEvidenceMaxAgeIsValidatedAtLoad(t *testing.T) {
 		})
 	}
 }
+
+// TestAllowedHostsCannotBeSatisfiedByAnAbsentHost closes a fail-open.
+//
+// The host check only ran when a host could be extracted: sourceHost returned
+// false for a source with no url, an empty url, a non-string url, an
+// unparseable one, or one with no host component, and the evaluator then added
+// no finding at all. A policy restricting sources to github.com was satisfied
+// by provenance that simply declined to say where the source came from --
+// including by naming file:///etc/passwd, where the absence of a host is the
+// point rather than an accident.
+//
+// Everything in a predicate is written by whoever signed it. An accepted
+// signer is trusted to be honest about what they did, not trusted to be
+// exempt from the rule, and a rule that only applies to statements that
+// volunteer enough detail to be checked is not a rule.
+func TestAllowedHostsCannotBeSatisfiedByAnAbsentHost(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name      string
+		requested map[string]any
+	}{
+		{"no url key", map[string]any{"ref": "main"}},
+		{"no requested map at all", nil},
+		{"an empty url", map[string]any{"url": ""}},
+		{"a url that is not a string", map[string]any{"url": 42}},
+		{"an unparseable url", map[string]any{"url": "://not a url"}},
+		{"a url with no host", map[string]any{"url": "file:///etc/passwd"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			doc := provenancePolicy(func(r *policy.ProvenanceRules) {
+				r.Sources.AllowedHosts = []string{"github.com"}
+			})
+			report := policy.Evaluate(doc, provenanceInput(func(p *evidence.DevProofProvenance) {
+				p.Sources = []evidence.SourceProvenance{{
+					Name: "content", Type: "git",
+					Resolver:   "devproof.thingz.io/git/v1",
+					TreeDigest: "sha256:" + treeHex,
+					Requested:  tc.requested,
+				}}
+			}))
+
+			if report.Trust == policy.StatusPass {
+				t.Errorf("a host restriction was satisfied by provenance with %s", tc.name)
+			}
+			if !hasFinding(report, policy.FindingSourceHostNotAllowed) {
+				t.Errorf("findings do not name the host rule: %v", report.Findings)
+			}
+		})
+	}
+}
+
+// TestAllowedHostsAcceptsANamedHost guards against the check rejecting
+// everything, which is the other way a rule stops being one.
+func TestAllowedHostsAcceptsANamedHost(t *testing.T) {
+	t.Parallel()
+
+	doc := provenancePolicy(func(r *policy.ProvenanceRules) {
+		r.Sources.AllowedHosts = []string{"github.com"}
+	})
+	report := policy.Evaluate(doc, provenanceInput(func(p *evidence.DevProofProvenance) {
+		p.Sources = []evidence.SourceProvenance{{
+			Name: "content", Type: "git",
+			Resolver:   "devproof.thingz.io/git/v1",
+			TreeDigest: "sha256:" + treeHex,
+			Requested:  map[string]any{"url": "https://github.com/example/config.git"},
+		}}
+	}))
+
+	if report.Trust != policy.StatusPass {
+		t.Errorf("a source from an allowed host was rejected: %v", report.Findings)
+	}
+}
+
+// hasFinding reports whether a report carries a finding with the given code.
+func hasFinding(report *policy.Report, code string) bool {
+	for _, finding := range report.Findings {
+		if finding.Code == code {
+			return true
+		}
+	}
+	return false
+}

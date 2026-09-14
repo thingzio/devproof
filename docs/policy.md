@@ -146,8 +146,17 @@ statement is true, and a trusted signer can still publish one that contradicts
 the artifact it is bound to. Malformed or internally contradictory assertions
 never become verified facts.
 
-Source rules cannot be satisfied vacuously either: a policy restricting source
-types or hosts is not met by provenance recording no sources at all.
+Source rules cannot be satisfied vacuously either. A policy restricting source
+types or hosts is not met by provenance recording no sources at all, and
+`allowedHosts` is not met by a source that records no host to check — no URL,
+an unparseable one, or one with no host component such as `file:///etc/passwd`.
+A predicate is written by whoever signed it, so a rule that applied only to
+statements volunteering enough detail to be checked would be no rule.
+
+That applies to every source, which has a consequence worth knowing before
+setting it: a local path source names no host either, so a policy restricting
+hosts refuses one. If local sources are acceptable, name the acceptable types
+with `allowedTypes` rather than leaving the host rule to decide.
 
 Source-location rules apply to provenance evidence, not to payload identity.
 Two attestations may truthfully describe different source histories for the

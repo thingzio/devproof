@@ -485,7 +485,21 @@ func evaluateSource(rules SourceRules, source evidence.SourceProvenance, evidenc
 	}
 
 	if len(rules.AllowedHosts) > 0 {
-		if host, ok := sourceHost(source); ok && !slices.Contains(rules.AllowedHosts, host) {
+		host, named := sourceHost(source)
+		switch {
+		case !named:
+			// A source that does not say where it came from cannot satisfy a
+			// rule about where sources may come from. This used to add no
+			// finding at all, so a policy restricting sources to one host was
+			// met by provenance that simply declined to name one -- and
+			// everything in a predicate is written by whoever signed it.
+			report.AddFinding(Finding{
+				Code: FindingSourceHostNotAllowed, Rule: "provenance.sources.allowedHosts",
+				Severity: SeverityError, Subject: evidenceDigest,
+				Message: fmt.Sprintf("the policy restricts source hosts, and source %q "+
+					"records no host to check", source.Name),
+			})
+		case !slices.Contains(rules.AllowedHosts, host):
 			report.AddFinding(Finding{
 				Code: FindingSourceHostNotAllowed, Rule: "provenance.sources.allowedHosts",
 				Severity: SeverityError, Subject: evidenceDigest,
@@ -504,7 +518,14 @@ func evaluateSource(rules SourceRules, source evidence.SourceProvenance, evidenc
 	}
 }
 
-// sourceHost extracts the host a remote source came from.
+// sourceHost extracts the host a source came from, reporting whether one was
+// established at all.
+//
+// The second return value is load-bearing: "no host" and "a host the policy
+// dislikes" are different facts, and only the caller knows whether the first
+// one is acceptable. Nothing here guesses -- a URL with no host component, such
+// as file:///etc/passwd, names no host, and treating the absence as a pass is
+// how the rule stopped applying to exactly the statements worth checking.
 func sourceHost(source evidence.SourceProvenance) (string, bool) {
 	raw, ok := source.Requested["url"].(string)
 	if !ok || raw == "" {
