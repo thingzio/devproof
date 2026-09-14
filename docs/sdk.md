@@ -247,10 +247,10 @@ The filesystem is a verified, read-only view. The SDK does not discover a
 validator inside the artifact and does not execute payload files. Validators
 return stable rule identifiers, severity, paths, and messages.
 
-**Not implemented.** No validator type exists in the module, exported or
-otherwise, and `semantics` is reported as `not-evaluated` unconditionally. The
-sketch above is a design, not a contract — see
-[the proposal](proposals/semantic-validation.md) and DP-026.
+The interface is `internal/semantic.Validator`, so it is implementable from
+inside this module and nowhere else (DP-026). A public interface is a permanent
+obligation and two real validators are needed before the shape can be trusted;
+it will be promoted in a minor release without a format change.
 
 ## Operation requests
 

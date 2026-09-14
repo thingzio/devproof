@@ -686,6 +686,7 @@ var reportSchemaObjects = map[reflect.Type]string{
 	reflect.TypeOf(policy.Report{}):           "",
 	reflect.TypeOf(policy.Finding{}):          "finding",
 	reflect.TypeOf(policy.Limit{}):            "limit",
+	reflect.TypeOf(policy.Record{}):           "validatorRecord",
 	reflect.TypeOf(policy.AcceptedEvidence{}): "acceptedEvidence",
 }
 
@@ -791,6 +792,9 @@ func TestProofReportValidatesAgainstItsSchema(t *testing.T) {
 		TrustRoots:       []string{testDigest},
 		EvaluatedAt:      "2026-03-01T12:00:00Z",
 		EvidenceStorage:  "referrers",
+		Validators: []policy.Record{
+			{Name: "firmware-catalog", Status: policy.StatusPass},
+		},
 		Limits: []policy.Limit{
 			{Name: "maxFiles", Value: 10000, Origin: "policy"},
 			{Name: "maxExpandedBytes", Value: 1073741824, Origin: "default"},

@@ -26,6 +26,7 @@ import (
 	"fmt"
 	"hash"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -55,6 +56,17 @@ type ExtractOptions struct {
 	LayerDigest canonical.Digest
 	// LayerSize is the compressed layer's size from the OCI descriptor.
 	LayerSize int64
+	// BeforePublish inspects the staged tree and can refuse it.
+	//
+	// Called after every entry has been written and verified, and before the
+	// rename that publishes it. A hook that returns an error means nothing is
+	// published -- not written and then removed, which is a weaker guarantee,
+	// because content that briefly existed has already been readable by
+	// anything watching the directory (DP-032).
+	//
+	// The filesystem is read-only and rooted at the staging directory, so a
+	// hook cannot reach outside it or modify what it was asked to judge.
+	BeforePublish func(fs.FS) error
 }
 
 // ExtractResult reports what was published.
@@ -140,6 +152,14 @@ func Extract(ctx context.Context, layer io.Reader, opts ExtractOptions) (_ *Extr
 	// half-written executable is never briefly executable.
 	if err := extractor.applyModes(); err != nil {
 		return nil, err
+	}
+
+	// The last point at which refusing costs nothing. Everything is written
+	// and verified, and the destination does not exist yet.
+	if opts.BeforePublish != nil {
+		if err := opts.BeforePublish(os.DirFS(staging.Path())); err != nil {
+			return nil, err
+		}
 	}
 
 	// Every handle on the staging directory must be closed before it is

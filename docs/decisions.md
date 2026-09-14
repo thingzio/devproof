@@ -409,16 +409,19 @@ internal costs nothing: no v1 operation requires validator execution.
 Consequence: the interface may be promoted in a later minor release without a
 format change. It may not be narrowed once exported.
 
-**Current state: not built.** This record previously read "`Validator` is
-defined but unexported... unless an embedding application supplies one through
-an internal seam". No such type exists, exported or not, and there is no seam.
-`verify` and `expand` report `semantics: not-evaluated` unconditionally,
-because nothing can supply a verdict.
+`Validator` lives in `internal/semantic`, so nothing outside this module can
+name it. That is what makes the seam honest rather than cosmetic: the interface
+cannot acquire external implementers before it is ready for them. `WithValidator`
+is exported and takes that internal type, which is callable from inside the
+module and nowhere else.
 
-The decision above stands and is not what was wrong; the description of the
-implementation was. A decision record that describes code nobody wrote is worse
-than a gap, because it is the document a reader consults to find out whether
-the gap exists. See [the design](proposals/semantic-validation.md).
+`verify` and `expand` report `semantics: not-evaluated` when no validator is
+supplied, which is the default and costs nothing.
+
+This record previously claimed the type already existed. It did not, in any
+form, and the claim stood while the dimension had no implementation at all — a
+decision record that describes code nobody wrote is worse than a gap, because
+it is the document a reader consults to find out whether the gap exists.
 
 ## DP-027: One referrer carries one signed statement
 

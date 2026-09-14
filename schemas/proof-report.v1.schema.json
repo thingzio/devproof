@@ -76,6 +76,11 @@
       "enum": ["referrers", "tag-fallback"],
       "description": "How evidence was found. The fallback tag scheme cannot express a set and silently replaces, so a consumer needs to know which mode produced the answer (DP-028)."
     },
+    "validators": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/validatorRecord" },
+      "description": "Which semantic validators ran and what each concluded. A result showing semantics: pass without naming the validators is not auditable, and two consumers running different validator sets would produce identical-looking results."
+    },
     "limits": {
       "type": "array",
       "items": { "$ref": "#/$defs/limit" },
@@ -117,6 +122,20 @@
         "viaTagFallback": {
           "type": "boolean",
           "description": "Found under the fallback tag scheme rather than the referrers API."
+        }
+      }
+    },
+    "validatorRecord": {
+      "type": "object",
+      "required": ["name", "status"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "The validator's stable identifier."
+        },
+        "status": {
+          "$ref": "#/$defs/status",
+          "description": "That validator's own verdict. The report's semantics is the conjunction: one failure fails the dimension."
         }
       }
     },

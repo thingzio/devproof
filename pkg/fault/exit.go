@@ -53,6 +53,13 @@ const (
 	// ExitTransport reports authentication, authorization, registry, or
 	// network failure.
 	ExitTransport = 6
+	// ExitSemantics reports a caller-supplied validator rejecting the payload.
+	//
+	// Distinct from ExitPolicy on purpose. "I do not trust who made this" and
+	// "I trust who made this and the content is wrong" are different failures
+	// with different remediations by different people, and a gate that cannot
+	// tell them apart routes every failure to whoever owns signing.
+	ExitSemantics = 7
 	// ExitInternal reports a broken invariant.
 	ExitInternal = 10
 	// ExitInterrupted reports termination by SIGINT, following the shell's
@@ -82,6 +89,8 @@ var exitCodes = map[Code]int{
 
 	CodeEvidenceInvalid: ExitPolicy,
 	CodePolicyFailed:    ExitPolicy,
+
+	CodeSemanticsFailed: ExitSemantics,
 
 	CodeAuthentication: ExitTransport,
 	CodeAuthorization:  ExitTransport,

@@ -88,8 +88,10 @@ them say `not-evaluated` rather than `pass`:
   inventory.
 - **trust** — who produced them, and do you accept that? Nobody asked, so
   nothing was checked.
-- **semantics** — is the content valid for your use? Reserved; always
-  `not-evaluated` today.
+- **semantics** — is the content valid for your use? Answered by a
+  [validator the embedding application supplies](../../docs/policy.md#semantic-validation).
+  The CLI ships none, so it reports `not-evaluated` here — which is the honest
+  answer, not a placeholder.
 
 `not-evaluated` is deliberately not a synonym for `pass`. If your trust
 configuration silently failed to load, you see this instead of a green check —

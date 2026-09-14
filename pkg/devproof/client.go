@@ -26,6 +26,7 @@ import (
 
 	"github.com/thingzio/devproof/internal/canonical"
 	"github.com/thingzio/devproof/internal/oci"
+	"github.com/thingzio/devproof/internal/semantic"
 	"github.com/thingzio/devproof/pkg/artifact"
 	"github.com/thingzio/devproof/pkg/bundle"
 	"github.com/thingzio/devproof/pkg/evidence"
@@ -57,8 +58,12 @@ type Client struct {
 	// verifierSource names the option that installed verifier, so a second
 	// one can be refused rather than silently replacing it.
 	verifierSource string
-	clock          func() time.Time
-	offline        bool
+
+	// validators answer the semantics dimension. Empty is the default and
+	// means not-evaluated, which is never a pass (DP-014).
+	validators []semantic.Validator
+	clock      func() time.Time
+	offline    bool
 	// closed is atomic because Close may be called while an operation is in
 	// flight, and the type documents itself as safe for concurrent use. An
 	// ordinary bool made that claim false under the race detector for exactly
@@ -234,6 +239,36 @@ func WithAttester(attester evidence.Attester) Option {
 			return fault.New(fault.CodeInvalidInput, clientOp, "attester must not be nil")
 		}
 		c.attester = attester
+		return nil
+	}
+}
+
+// WithValidator registers a semantic validator.
+//
+// Repeatable. Every validator runs, and semantics passes only if all of them
+// do, because a domain has a schema check and a completeness check and they
+// are not one thing.
+//
+// Supplying none is the default: semantics reports not-evaluated, nothing is
+// materialized, and the operation costs exactly what it costs today.
+//
+// The parameter type lives in internal/, so this is callable only from inside
+// this module. That is deliberate and temporary (DP-026): a public interface
+// is a permanent compatibility obligation, and two real validators are needed
+// before the shape can be trusted. It will be promoted in a minor release
+// without a format change.
+func WithValidator(validators ...semantic.Validator) Option {
+	return func(c *Client) error {
+		for _, validator := range validators {
+			if validator == nil {
+				return fault.New(fault.CodeInvalidInput, clientOp, "validator must not be nil")
+			}
+			if validator.Name() == "" {
+				return fault.New(fault.CodeInvalidInput, clientOp,
+					"a validator must have a name; a result names what judged it")
+			}
+		}
+		c.validators = append(c.validators, validators...)
 		return nil
 	}
 }

@@ -12,11 +12,6 @@ Known outstanding against the criteria above:
 
 - **Phase 0.** The provenance predicate has no published schema. Manifest,
   lock, config, policy, and the proof report do.
-- **Phases 1 and 4.** Semantic validation does not exist. `semantics` is
-  `not-evaluated` on every result ever produced, there is no validator type,
-  and DP-026 described an internal seam that was never written. One of the
-  three dimensions has no implementation — see
-  [the design](proposals/semantic-validation.md).
 - **Phase 6.** A second independent read implementation in another language
   does not exist. `pkg/conformance` is one in Go — it shares no code with the
   writer and checks structure, canonical semantics, and the published byte
@@ -26,7 +21,10 @@ Known outstanding against the criteria above:
 That list is the real roadmap. Writing "delivered" against phases whose exit
 criteria are unmet is how a roadmap stops being useful.
 
-Closed since this list was first written: evidence now moves with its subject
+Closed since this list was first written: semantic validation exists, so the
+third dimension is answerable rather than permanently `not-evaluated` — the
+interface stays internal until a second validator proves its shape (DP-026);
+evidence now moves with its subject
 through `copy`, which is the registry-to-air-gap path and the one case with no
 second chance to attach it; standalone `verify` now fetches and hashes the
 payload, so a subject whose layer is absent or altered fails rather

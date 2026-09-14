@@ -225,6 +225,10 @@ Rules:
   supplying both used to accept the trust root and then discard it, leaving an
   operator who believed they had pinned one having pinned nothing.
 
+`semantics` is `not-evaluated` unless the embedding application supplied a
+validator; the CLI ships none, so it always reports that. A semantic failure
+exits `7` — see [semantic validation](policy.md#semantic-validation).
+
 Text output separates integrity, trust, and semantic results. JSON output uses
 stable field names and finding codes. Quiet output is the resolved subject
 digest only on success.

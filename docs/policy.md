@@ -262,6 +262,69 @@ resource-limit-exceeded
 
 Messages are not stable APIs; codes and JSON field meanings are.
 
+## Semantic validation
+
+The third dimension. Integrity asks whether the bytes survived and trust asks
+who vouched for them; both are questions about the artifact, so DevProof
+answers both. Whether the content is *correct* is a question about a domain,
+and DevProof has none — so it is answered by a validator the embedding
+application supplies.
+
+Supplying none is the default: `semantics` reports `not-evaluated`, nothing is
+materialized, and the operation costs what it always did.
+
+A validator receives a context, a read-only view of the payload, and the
+verified inventory. It receives no capability belonging to DevProof — no
+transport, no credential provider, no writable path. That is a statement about
+what the SDK hands over rather than a sandbox: a validator is in-process code
+the application chose, and what it cannot do is reach the registry DevProof was
+talking to or the credentials it used.
+
+Nothing is discovered from the artifact. A bundle cannot name its own validator
+any more than it can name the policy that judges it.
+
+### What a verdict means
+
+| Situation | `semantics` |
+| --- | --- |
+| No validator supplied | `not-evaluated` |
+| Every validator returns no error findings | `pass` |
+| Any validator returns an error finding | `fail` |
+| A validator returns an error | `fail` |
+| A validator panics | `fail`, recovered and reported |
+
+A validator that *errors* fails rather than reporting `not-evaluated`. "Nobody
+looked" and "somebody looked and could not finish" are different facts, and
+conflating them makes a broken validator indistinguishable from an absent one.
+A panic is recovered because a validator is third-party code running inside a
+verification, and one that killed the process would turn a content check into a
+denial of service against the tool that invoked it.
+
+Every validator runs even after one fails, so a consumer fixing content gets
+the whole list rather than one item per run.
+
+Findings carry the `semantics-invalid` code and a rule namespaced as
+`semantics/<validator>/<rule>`, so a content finding is distinguishable from a
+trust finding at a glance. The report records which validators ran and what
+each concluded, for the same reason it records the policy digest and the trust
+roots: a passing result has to name what produced it.
+
+### Where it runs
+
+On `verify`, the payload is expanded into a private directory that is removed
+before the command returns — a validator needs content on disk, and the caller
+asked for validation rather than for an expansion.
+
+On `expand`, validation runs against the staged tree *before* the rename that
+publishes it. A rejected expansion leaves nothing behind, which is a stronger
+guarantee than writing and then removing: content that briefly existed has
+already been readable by anything watching the directory (DP-032).
+
+A semantic failure exits `7`, not the policy code. "I do not trust who made
+this" and "I trust who made this and the content is wrong" are different
+failures with different remediations, and a gate that cannot tell them apart
+routes everything to whoever owns signing.
+
 ## Proof report
 
 The complete verification result is the DevProof proof report. Its grammar is

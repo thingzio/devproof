@@ -594,7 +594,14 @@ func (c *Client) Verify(ctx context.Context, req VerifyRequest) (*policy.Report,
 	// payload it was gating.
 	limits := c.limitsFor(req.Limits, doc, havePolicy)
 
-	subject, pinned, err := c.loadSubject(ctx, req, limits, checkPayload)
+	// With validators, the payload is read by the extraction that materializes
+	// it for them, which checks the same things this pass does. Reading it
+	// twice would double the transfer for no additional guarantee.
+	payload := checkPayload
+	if c.validating() {
+		payload = metadataOnly
+	}
+	subject, pinned, err := c.loadSubject(ctx, req, limits, payload)
 	if err != nil {
 		return nil, err
 	}
@@ -611,10 +618,20 @@ func (c *Client) Verify(ctx context.Context, req VerifyRequest) (*policy.Report,
 			Message: "no verification policy was supplied, so trust was not evaluated; " +
 				"integrity alone does not establish that this artifact came from anyone in particular",
 		})
+		if validateErr := c.runValidators(ctx, pinned, subject, limits, report); validateErr != nil {
+			return nil, validateErr
+		}
 		return report, nil
 	}
 
-	return c.evaluatePolicy(ctx, doc, subject, pinned, req, limits)
+	report, err := c.evaluatePolicy(ctx, doc, subject, pinned, req, limits)
+	if err != nil {
+		return nil, err
+	}
+	if err := c.runValidators(ctx, pinned, subject, limits, report); err != nil {
+		return nil, err
+	}
+	return report, nil
 }
 
 // loadPolicy resolves which policy a request supplies.
@@ -834,6 +851,10 @@ func (c *Client) Expand(ctx context.Context, req ExpandRequest) (_ *ExpandResult
 		Limits:      limits.Limits,
 		LayerDigest: subject.LayerDigest,
 		LayerSize:   subject.LayerSize,
+		// Judged in the staging directory, before the rename that publishes
+		// it. A refusal leaves nothing behind, which is a stronger guarantee
+		// than writing and then removing (DP-032).
+		BeforePublish: c.validateStaged(ctx, subject, report),
 	})
 	if err != nil {
 		return nil, err

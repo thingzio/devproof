@@ -99,6 +99,11 @@ const (
 	CodeEvidenceInvalid Code = "evidence-invalid"
 	// CodePolicyFailed covers verified facts not satisfying the policy.
 	CodePolicyFailed Code = "policy-failed"
+
+	// CodeSemanticsFailed reports that a caller-supplied validator rejected
+	// the payload. The artifact is intact and may be perfectly trusted; its
+	// content is not what the caller requires.
+	CodeSemanticsFailed Code = "semantics-failed"
 	// CodeDestinationExists covers an expansion destination already present.
 	CodeDestinationExists Code = "destination-exists"
 	// CodeTimeout covers an operation exceeding its deadline.
@@ -133,6 +138,7 @@ var allCodes = []Code{
 	CodeTransport,
 	CodeEvidenceInvalid,
 	CodePolicyFailed,
+	CodeSemanticsFailed,
 	CodeDestinationExists,
 	CodeTimeout,
 	CodeCanceled,

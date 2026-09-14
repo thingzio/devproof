@@ -96,15 +96,19 @@ const (
 	// FindingProvenanceInconsistent marks a signed statement whose claims
 	// contradict what verification established. A signature proves authorship,
 	// not truth.
-	FindingProvenanceInconsistent  = "provenance-inconsistent"
-	FindingPredicateNotAllowed     = "predicate-not-allowed"
-	FindingBuilderNotAllowed       = "builder-not-allowed"
-	FindingLockDigestRequired      = "lock-digest-required"
-	FindingSourceTypeNotAllowed    = "source-type-not-allowed"
-	FindingSourceHostNotAllowed    = "source-host-not-allowed"
-	FindingImmutableResolution     = "immutable-resolution-required"
-	FindingSubjectMismatch         = "evidence-subject-mismatch"
-	FindingEvidenceExpired         = "evidence-expired"
+	FindingProvenanceInconsistent = "provenance-inconsistent"
+	FindingPredicateNotAllowed    = "predicate-not-allowed"
+	FindingBuilderNotAllowed      = "builder-not-allowed"
+	FindingLockDigestRequired     = "lock-digest-required"
+	FindingSourceTypeNotAllowed   = "source-type-not-allowed"
+	FindingSourceHostNotAllowed   = "source-host-not-allowed"
+	FindingImmutableResolution    = "immutable-resolution-required"
+	FindingSubjectMismatch        = "evidence-subject-mismatch"
+	FindingEvidenceExpired        = "evidence-expired"
+	// FindingSemanticsInvalid reports a caller-supplied validator rejecting
+	// the payload. Distinct from every trust code: the artifact may be
+	// perfectly trusted and its content still wrong.
+	FindingSemanticsInvalid        = "semantics-invalid"
 	FindingMatchingEvidenceInvalid = "matching-evidence-invalid"
 	FindingIgnoredEvidence         = "evidence-ignored"
 	FindingTagFallbackNotAllowed   = "evidence-tag-fallback-not-allowed"
@@ -171,6 +175,15 @@ type Report struct {
 	// machine, and trust material is not a secret but its location can be.
 	TrustRoots []string `json:"trustRoots,omitempty"`
 
+	// Validators records which semantic validators ran and what each
+	// concluded.
+	//
+	// Same principle as PolicyDigest and TrustRoots: a passing result has to
+	// name what produced it. A report showing semantics: pass without naming
+	// the validators is not auditable, and two consumers running different
+	// validator sets would produce identical-looking results.
+	Validators []Record `json:"validators,omitempty"`
+
 	// Limits records the bounds this verification actually ran under and
 	// where each came from (DP-021).
 	//
@@ -197,6 +210,15 @@ type AcceptedEvidence struct {
 	// ViaTagFallback reports that the evidence was found under the fallback
 	// tag scheme, which cannot express a set (DP-028).
 	ViaTagFallback bool `json:"viaTagFallback,omitempty"`
+}
+
+// Record is one semantic validator and what it concluded.
+type Record struct {
+	// Name is the validator's stable identifier.
+	Name string `json:"name"`
+	// Status is that validator's own verdict. The report's Semantics is the
+	// conjunction: one failure fails the dimension.
+	Status Status `json:"status"`
 }
 
 // Limit is one resource bound as it applied to a verification.
