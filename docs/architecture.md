@@ -125,6 +125,12 @@ The expander consumes a verified artifact and writes its canonical payload to a
 new destination. Extraction and verification are one operation: bytes are
 hashed as they are written, and no unverified result is published.
 
+A semantic validator, when one is supplied, judges the staged tree before the
+rename that publishes it. A rejected expansion therefore leaves nothing behind
+rather than writing and removing, which is the same guarantee a failed policy
+gives (DP-032). On `verify` the payload is materialized into a private
+directory that is removed before the command returns.
+
 ## Build flow
 
 ### Manifest build

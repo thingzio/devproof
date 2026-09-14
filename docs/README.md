@@ -42,7 +42,8 @@ The first version is not:
 - a container image builder or runtime;
 - a registry server;
 - a secrets manager;
-- a semantic validator for arbitrary payload types;
+- a semantic validator for any particular payload type — DevProof provides the
+  seam and answers the dimension, and the checks themselves belong to a domain;
 - a mechanism for executing code carried inside a bundle;
 - a byte-for-byte preservation format for every operating-system filesystem
   feature.

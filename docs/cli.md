@@ -433,6 +433,7 @@ that was not caused by SIGINT uses the operational failure code and reports
 4    artifact construction, integrity, digest, or expansion error
 5    evidence or verification-policy failure
 6    authentication, authorization, registry, or network transport error
+7    a caller-supplied semantic validator rejected the payload
 10   unexpected internal error
 130  interrupted by SIGINT
 ```

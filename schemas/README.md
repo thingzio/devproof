@@ -1,6 +1,7 @@
 # DevProof JSON Schemas
 
-Machine-readable schemas for every document DevProof reads.
+Machine-readable schemas for every document DevProof reads, and the one it
+writes.
 
 | Schema | Document | `apiVersion` / `kind` |
 | --- | --- | --- |
@@ -8,6 +9,14 @@ Machine-readable schemas for every document DevProof reads.
 | [`bundle-lock.v1alpha1`](bundle-lock.v1alpha1.schema.json) | lock, usually `devproof.lock.json` | `devproof.thingz.io/v1alpha1` · `BundleLock` |
 | [`verification-policy.v1alpha1`](verification-policy.v1alpha1.schema.json) | verification policy | `devproof.thingz.io/v1alpha1` · `VerificationPolicy` |
 | [`bundle-config.v1`](bundle-config.v1.schema.json) | the OCI config blob inside a bundle | format `devproof-bundle-v1` |
+| [`proof-report.v1`](proof-report.v1.schema.json) | the verification result DevProof **produces** | — |
+
+The proof report is the odd one out, and the difference matters. The other four
+describe input, and their decoders are strict: an unknown field is an error,
+because a field this build does not understand may be load-bearing for whoever
+wrote it. The report describes output, and nothing decodes it strictly — a
+consumer that ignores a field a later version added should degrade rather than
+fail. What does not change is the meaning of a field that is present.
 
 They are JSON Schema draft 2020-12. The manifest and policy may be written as
 YAML or JSON; validate YAML by converting it to JSON first, since these
@@ -95,6 +104,13 @@ validation. A document that validates is well-formed, not necessarily valid.
   carrying none fails the rule rather than satisfying it. The pattern here
   constrains the spelling of the duration, not what it means.
 
+**Proof report**
+
+- `semantics` is `pass` only if every entry in `validators` passed, and the
+  absence of that array with `semantics: pass` is not a valid result; and
+- a `not-evaluated` dimension is never a pass, which is a rule about how a
+  consumer reads the document rather than about its shape.
+
 The path and sorting rules are the ones worth knowing about, because they are
 what make a config describe exactly one archive. JSON Schema can say an array
 holds objects with a `path` string; it cannot say the array is sorted, that
@@ -107,7 +123,11 @@ A schema's identity is its `$id`. Document versions follow `apiVersion` and
 `kind`, which are versioned independently of the bundle format and of the Go
 module — see [docs/compatibility.md](../docs/compatibility.md).
 
-Decoding is strict, so adding a field to any of these documents requires a new
-`apiVersion` rather than a compatible schema revision. That cost is deliberate:
-a reader that ignored an unrecognized field would silently not enforce a rule
-somebody wrote down.
+Decoding is strict for the four input documents, so adding a field to one of
+them requires a new `apiVersion` rather than a compatible schema revision. That
+cost is deliberate: a reader that ignored an unrecognized field would silently
+not enforce a rule somebody wrote down.
+
+The proof report is the exception in this direction too. It is output, nothing
+decodes it strictly, and a field may be added within `v1` — which is what makes
+a consumer that ignores unrecognized fields the correct kind of consumer.

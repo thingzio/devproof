@@ -92,7 +92,9 @@ Everything exported from `pkg/devproof` and from `pkg/bundle`, `pkg/policy`,
 
 ### Not covered
 
-- anything under `internal/`, which is enforced by the compiler;
+- anything under `internal/`, which is enforced by the compiler. That includes
+  the semantic validator interface, which is deliberately unexported in v1
+  (DP-026) and may change shape without a major release until it is promoted;
 - the exact text of error messages. Error *codes* are API; the sentences are
   written for the human deciding what to do next, and nothing should parse
   them;

@@ -373,6 +373,7 @@ authorization
 transport
 evidence-invalid
 policy-failed
+semantics-failed
 destination-exists
 timeout
 canceled

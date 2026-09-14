@@ -120,17 +120,22 @@ Most tools collapse these into one boolean. Keeping them apart is the point.
 | --- | --- | --- |
 | **integrity** | Are these the bytes the artifact claims? | nothing — always checked |
 | **trust** | Who produced them, and do I accept that? | a policy |
-| **semantics** | Is the content valid for my use? | reserved for v1; always `not-evaluated` |
+| **semantics** | Is the content valid for my use? | a validator, supplied by the embedding application |
 
 A dimension you did not ask about reports `not-evaluated`, **never `pass`**. If
 your trust configuration silently failed to load, you will see
 `trust: not-evaluated` rather than a green check — which is the difference
 between knowing and assuming.
 
-Semantics is reserved. The validator interface is deliberately unexported in
-v1 ([DP-026](docs/decisions.md)), so this dimension always reports
-`not-evaluated` — it is in the report because a consumer should see that
-nothing checked content meaning, not because you can plug something in yet.
+Semantics is answered by a validator you supply. DevProof has no domain, so it
+has no opinion about what your payload means — it provides the seam, not the
+check. The CLI ships no validator, so it reports `not-evaluated`, which is the
+honest answer rather than a placeholder.
+
+The interface is deliberately unexported in v1
+([DP-026](docs/decisions.md)): a public interface is a permanent obligation,
+and two real validators are needed before its shape can be trusted. See
+[semantic validation](docs/policy.md#semantic-validation).
 
 ```yaml
 apiVersion: devproof.thingz.io/v1alpha1

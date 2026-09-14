@@ -349,6 +349,7 @@ The CLI maps every typed SDK code onto the documented exit codes:
 4   digest-mismatch, invalid-artifact, destination-exists, limit-exceeded
 5   evidence-invalid, policy-failed
 6   authentication, authorization, transport, timeout
+7   semantics-failed
 10  internal
 130 canceled, when caused by SIGINT
 ```
@@ -363,6 +364,11 @@ script branching on "they differ" could not tell that case from a registry
 timeout. `diff`, `grep`, and `git diff --exit-code` all made the same choice.
 `TestExitCodeNeverReturnsOne` keeps `1` unreachable from any error code, so
 the two can never blur.
+
+`semantics-failed` gets `7` rather than joining `5`. "I do not trust who made
+this" and "I trust who made this and the content is wrong" are different
+failures, remediated by different people, and a gate that collapsed them would
+route every content problem to whoever owns signing.
 
 `limit-exceeded` maps to `4` because a limit is a property of the artifact
 being constructed or consumed. `timeout` maps to `6` because every bounded

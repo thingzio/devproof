@@ -47,10 +47,15 @@ ago.
 **Completeness and correctness are not checked.** `semantics: not-evaluated`
 is the honest answer and appears in every output below: a catalog missing a
 component, or naming a version that was never qualified, passes exactly as
-well as a correct one provided the accepted key signed it. Verifying *what a
-document says* would need a firmware schema, a required-component set, and a
-comparison against observed rack inventory — none of which is here, and the
-first of which DevProof deliberately does not define.
+well as a correct one provided the accepted key signed it.
+
+That dimension is answerable — an embedding application can supply a
+[semantic validator](../../docs/policy.md#semantic-validation), and a firmware
+one is the obvious first: a required-component set, one file per component, no
+unknown subsystems. The CLI ships none, and this walkthrough uses the CLI, so
+what you see here is what an unvalidated catalog looks like. DevProof still
+defines no firmware schema and is not going to; the seam is the point, and the
+checks belong to whoever owns the domain.
 
 **Nothing here authenticates firmware.** The catalog records filenames and
 versions. It does not carry package bytes, NVIDIA's package signatures, or
