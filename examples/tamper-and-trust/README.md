@@ -179,7 +179,81 @@ built on it cannot pass by accident.
 
 ---
 
-## 5. Changing the bytes is caught
+## 5. Satisfying the gate without managing a key
+
+Step 4 failed because nothing had signed the bundle. There are two ways to fix
+that, and only one of them involves a secret.
+
+A key you generate is the obvious one, and the
+[firmware example](../firmware-catalog/) uses it because it runs anywhere.
+Keyless is what CI should use: no key to generate, store, rotate, or leak.
+Instead of proving you hold a secret, the build proves it *is* a particular
+workload — a short-lived certificate issued against the OIDC token the runner
+already has, recorded in a public transparency log, with the private key
+discarded before the job ends.
+
+```sh
+devproof build ./content --to oci-layout://./signed --tag v1 --sign
+```
+
+`--sign` is keyless by default; `--key` is the opt-out. Nothing prompts and
+nothing opens a browser — DevProof reads an *ambient* identity and fails with
+an explanation when there is not one, rather than starting a device flow. That
+is why this block is marked `sh` rather than `bash`: the demo's test suite runs
+every `bash` block, and this one cannot succeed on a laptop. Run it in CI.
+
+The identity that comes back is the workload, not a person and not a key:
+
+```console
+signed by:  https://github.com/your-org/your-repo/.github/workflows/release.yaml@refs/tags/v1.0.0 (https://token.actions.githubusercontent.com)
+```
+
+A policy then names that identity. Note what is being pinned — an issuer and a
+subject pattern, rather than a key fingerprint that would change the day it is
+rotated:
+
+```sh
+cat > keyless.yaml <<'EOF'
+apiVersion: devproof.thingz.io/v1alpha1
+kind: VerificationPolicy
+metadata:
+  name: release-gate
+spec:
+  subject:
+    requireDigestReference: true
+  provenance:
+    required: true
+  signatures:
+    threshold: 1
+    requireTransparencyLog: true
+    identities:
+      - issuer: "https://token.actions.githubusercontent.com"
+        subjectPattern: "^https://github\\.com/your-org/your-repo/\\.github/workflows/release\\.yaml@refs/tags/v.*$"
+EOF
+
+devproof verify oci-layout://./signed@sha256:... --policy keyless.yaml
+```
+
+Three details in that policy are doing real work:
+
+- **`subjectPattern` is anchored.** `^` and `$` are not decoration. An
+  unanchored pattern matching `your-org/your-repo` would also match
+  `attacker/your-repo-evil`, and the certificate for that is just as valid.
+- **It pins a workflow and a tag ref**, not a repository. Anyone who can push a
+  branch can otherwise run a workflow that signs as your repository.
+- **`requireTransparencyLog`** demands a proven log inclusion, not merely that
+  a log was mentioned. Without it, a signature with no public record is
+  accepted — and the public record is most of what keyless buys you.
+
+The trade is worth stating plainly: keyless removes the key you had to protect
+and replaces it with a dependency on your identity provider and a public log
+entry for every signature. For CI that is usually the better side of the trade.
+For an air-gapped signer it is not available at all, which is why
+[the firmware example](../firmware-catalog/) uses a local key.
+
+---
+
+## 6. Changing the bytes is caught
 
 This is the case everything else exists for. Build a different bundle, then
 overwrite the good bundle's payload with the attacker's — keeping the original
@@ -259,12 +333,14 @@ checking it is.
 - **A lossless round trip.** Pack, unpack, repack, same digest.
 - **A gate that writes nothing when it fails.** The destination never existed,
   and the exit code makes it usable in CI.
+- **A signature with no secret to keep.** Keyless binds the artifact to the
+  workload that built it, and the policy pins an issuer and an anchored subject
+  pattern rather than a key that rotation would invalidate.
 - **Tampering caught by reading the bytes.** Untouched metadata did not help
   the altered copy, and an identical artifact beside it still verified.
 
-Not shown here, to keep this to five minutes: signing and trust policy against
-a real identity, registries, air-gapped transfer with `--offline`, and
-resource bounds set by a policy.
+Not shown here, to keep this to five minutes: registries, air-gapped transfer
+with `--offline`, and resource bounds set by a policy.
 
 Clean up with `cd .. && rm -rf devproof-demo`.
 

@@ -12,6 +12,11 @@ Known outstanding against the criteria above:
 
 - **Phase 0.** The provenance predicate has no published schema. Manifest,
   lock, config, policy, and the proof report do.
+- **Phases 1 and 4.** Semantic validation does not exist. `semantics` is
+  `not-evaluated` on every result ever produced, there is no validator type,
+  and DP-026 described an internal seam that was never written. One of the
+  three dimensions has no implementation — see
+  [the design](proposals/semantic-validation.md).
 - **Phase 6.** A second independent read implementation in another language
   does not exist. `pkg/conformance` is one in Go — it shares no code with the
   writer and checks structure, canonical semantics, and the published byte

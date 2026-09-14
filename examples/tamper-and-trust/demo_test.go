@@ -32,8 +32,14 @@ import (
 )
 
 // bashBlock matches a fenced bash block, which is what the document uses for
-// commands a reader is meant to run. console blocks hold expected output and
-// are deliberately not executed.
+// commands a reader is meant to run here and now. console blocks hold expected
+// output and are deliberately not executed.
+//
+// sh blocks are the third case: real commands that cannot run on the machine
+// executing this test. The keyless step needs an ambient OIDC identity, which a
+// CI runner has and a laptop does not, so running it would fail for a reason
+// the demo is not about. The fence is the marker, and the step says so in
+// prose rather than leaving a reader to notice.
 var bashBlock = regexp.MustCompile("(?s)```bash\n(.*?)```")
 
 // buildCLI compiles devproof into a directory and returns that directory.

@@ -581,13 +581,21 @@ func TestDocumentedExamplesAreValid(t *testing.T) {
 	yamlBlock := regexp.MustCompile("(?s)```yaml\n(.*?)```")
 	declares := regexp.MustCompile(`(?m)^kind:\s*(\S+)`)
 
+	// A document written into a heredoc inside a shell block is still a
+	// document a reader will copy. The keyless policy in the tamper-and-trust
+	// demo lives in an `sh` block -- it needs a workload identity, so the demo
+	// test cannot execute it -- which left it neither run nor schema-checked.
+	heredoc := regexp.MustCompile("(?s)```(?:sh|bash|console)\n.*?<<'?EOF'?\n(.*?)\nEOF")
+
 	var checked int
 	for _, file := range markdownFiles(t) {
 		data, err := os.ReadFile(file)
 		if err != nil {
 			t.Fatalf("reading %s: %v", file, err)
 		}
-		for i, block := range yamlBlock.FindAllStringSubmatch(string(data), -1) {
+		blocks := yamlBlock.FindAllStringSubmatch(string(data), -1)
+		blocks = append(blocks, heredoc.FindAllStringSubmatch(string(data), -1)...)
+		for i, block := range blocks {
 			body := block[1]
 			if !strings.Contains(body, "apiVersion:") {
 				continue

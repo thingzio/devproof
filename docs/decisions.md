@@ -402,16 +402,23 @@ everyone who can read the published evidence.
 
 ## DP-026: The semantic validator interface stays internal in v1
 
-`Validator` is defined but unexported. `verify` and `expand` report
-`semantics: not-evaluated` unless an embedding application supplies one
-through an internal seam.
-
 A public interface is a permanent compatibility obligation, and DevProof does
 not yet have two real validators to prove the shape is right. Keeping it
 internal costs nothing: no v1 operation requires validator execution.
 
 Consequence: the interface may be promoted in a later minor release without a
 format change. It may not be narrowed once exported.
+
+**Current state: not built.** This record previously read "`Validator` is
+defined but unexported... unless an embedding application supplies one through
+an internal seam". No such type exists, exported or not, and there is no seam.
+`verify` and `expand` report `semantics: not-evaluated` unconditionally,
+because nothing can supply a verdict.
+
+The decision above stands and is not what was wrong; the description of the
+implementation was. A decision record that describes code nobody wrote is worse
+than a gap, because it is the document a reader consults to find out whether
+the gap exists. See [the design](proposals/semantic-validation.md).
 
 ## DP-027: One referrer carries one signed statement
 
