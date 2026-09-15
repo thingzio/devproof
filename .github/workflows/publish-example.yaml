@@ -1,0 +1,150 @@
+name: publish-example
+
+# Publishes the artifact that examples/publish-once-reproduce-anywhere/ is
+# about, and then plays the consumer against it.
+#
+# Manual, and meant to be run once. The artifact is immutable and the example
+# pins its digest, so republishing on every release would produce a second
+# artifact that the document does not describe while the one it does describe
+# sits there unchanged -- drift with extra steps. Re-run it only when the
+# content the manifest pins actually changes, and then update the digest in
+# the example in the same commit.
+#
+# Never on push or pull_request. A fork must not be able to mint this
+# repository's workload identity or write to its packages, and scoping the
+# trigger is a stronger guarantee than relying on default permissions.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-example
+  cancel-in-progress: false
+
+env:
+  # The example's document pins this reference. Changing it here without
+  # changing it there would leave the walkthrough describing an artifact
+  # nobody published.
+  PACKAGE: ghcr.io/thingzio/devproof/example-baseline
+  TAG: v1
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      # Mints the short-lived OIDC token keyless signing binds the artifact
+      # to. There is no long-lived signing secret anywhere in this workflow,
+      # which is the property the example teaches.
+      id-token: write
+      # Writes the bundle and its evidence to GHCR.
+      packages: write
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        with:
+          go-version-file: .go-version
+          check-latest: true
+
+      - name: build the CLI from this commit
+        run: go build -o "${RUNNER_TEMP}/devproof" ./cmd/devproof
+
+      # Registry credentials come from the Docker configuration, so a plain
+      # docker login is the whole setup (DP-031). No action needed for it, and
+      # one fewer third-party dependency to pin.
+      - name: authenticate to GHCR
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" |
+            docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      # The lock, not the manifest, decides what is packaged: the manifest
+      # names a tag and the lock pins the commit that tag resolved to. A build
+      # that cannot reproduce the locked tree fails rather than publishing
+      # something the consumers' locks would not rebuild.
+      - name: publish the bundle, signed keyless
+        working-directory: examples/publish-once-reproduce-anywhere
+        run: |
+          "${RUNNER_TEMP}/devproof" build \
+            -f devproof.yaml \
+            --lock devproof.lock.json \
+            --to "oci://${PACKAGE}" \
+            --tag "${TAG}" \
+            --sign
+
+      # Everything below is the consumer's half, run here against the artifact
+      # that was just published. It is transcribed into the example's README,
+      # so this job is also where that document's output blocks come from --
+      # which is the only way the document can show a real run rather than a
+      # plausible one.
+      - name: what a consumer sees
+        working-directory: examples/publish-once-reproduce-anywhere
+        run: |
+          # A quoted heredoc, so bash rewrites nothing. The workflow expression
+          # below is still substituted: Actions does that when it writes the
+          # script, before bash ever sees it. Unquoting the heredoc to get that
+          # substitution would also hand bash the backslashes, and the regex
+          # anchors would be the thing that silently disappeared.
+          cat > policy.yaml <<'EOF'
+          apiVersion: devproof.thingz.io/v1alpha1
+          kind: VerificationPolicy
+          metadata:
+            name: accept-the-publisher
+          spec:
+            subject:
+              requireDigestReference: true
+            provenance:
+              required: true
+            signatures:
+              threshold: 1
+              requireTransparencyLog: true
+              identities:
+                - issuer: "https://token.actions.githubusercontent.com"
+                  subjectPattern: "^https://github\\.com/${{ github.repository }}/\\.github/workflows/publish-example\\.yaml@refs/heads/main$"
+          EOF
+
+          echo "::group::inspect"
+          "${RUNNER_TEMP}/devproof" inspect "oci://${PACKAGE}:${TAG}" --evidence
+          echo "::endgroup::"
+
+          echo "::group::verify against the pinned identity"
+          "${RUNNER_TEMP}/devproof" verify "oci://${PACKAGE}:${TAG}" --policy policy.yaml
+          echo "::endgroup::"
+
+          echo "::group::independent rebuild from the lock"
+          "${RUNNER_TEMP}/devproof" build \
+            -f devproof.yaml --lock devproof.lock.json \
+            --to oci-layout://./rebuilt --tag "${TAG}"
+          echo "::endgroup::"
+
+          # diff exits 1 for "they differ", which is an answer rather than an
+          # error -- so it is read with if, not left to set -e. A bare command
+          # here would abort the step before it could say what happened, and
+          # "they differ" is precisely the outcome worth reporting clearly.
+          echo "::group::diff the published artifact against the rebuild"
+          if "${RUNNER_TEMP}/devproof" diff \
+               "oci://${PACKAGE}:${TAG}" "oci-layout://./rebuilt:${TAG}"; then
+            echo "diff exit: 0"
+          else
+            echo "::error::the rebuild does not match the published artifact"
+            exit 1
+          fi
+          echo "::endgroup::"
+
+      # A policy naming a workflow that did not sign this must fail. Without
+      # this step the one above passes for a reader who assumes the identity
+      # was checked, and a policy that accepts everything looks exactly like a
+      # policy that works.
+      - name: a policy naming the wrong workflow is refused
+        working-directory: examples/publish-once-reproduce-anywhere
+        run: |
+          sed 's|publish-example|some-other-workflow|' policy.yaml > wrong.yaml
+          if "${RUNNER_TEMP}/devproof" verify "oci://${PACKAGE}:${TAG}" --policy wrong.yaml; then
+            echo "::error::a policy naming the wrong workflow was accepted"
+            exit 1
+          fi
+          echo "refused, as it must be"
