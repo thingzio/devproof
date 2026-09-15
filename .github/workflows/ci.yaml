@@ -327,6 +327,45 @@ jobs:
         env:
           DEVPROOF_TEST_REGISTRY: localhost:5000
 
+  # examples/publish-once-reproduce-anywhere/ tells a reader that a stranger on
+  # a different operating system rebuilds the published artifact bit for bit.
+  # That is the one claim in the examples that a single machine cannot make:
+  # one runner agreeing with itself proves nothing about APFS against ext4.
+  #
+  # Two cells, because the operating system is the dimension the document
+  # claims. Architecture is already covered by the determinism matrix above,
+  # and repeating it here would buy a slower pipeline and no new signal.
+  #
+  # Unlike every other example, this one reaches the network -- github.com to
+  # resolve the locked commit, ghcr.io to read the published artifact and its
+  # evidence -- so the tests are opt-in and this job is what opts in. Without
+  # it they skip, and a skipped test that nobody notices is why the document
+  # would eventually describe something that had stopped being true.
+  example-reproduce:
+    name: example-reproduce (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        with:
+          go-version-file: .go-version
+          check-latest: true
+      # The air-gap step carries a Sigstore trusted root across by hand, and
+      # cosign is what materializes one. Absent, that assertion skips silently,
+      # so it is installed rather than assumed.
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6  # v4.1.2
+      - name: the walkthrough still holds
+        run: go test -count=1 ./examples/publish-once-reproduce-anywhere/
+        env:
+          DEVPROOF_EXAMPLE_GHCR: '1'
+
   build:
     runs-on: ubuntu-latest
     steps:

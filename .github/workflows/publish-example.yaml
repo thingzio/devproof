@@ -29,6 +29,11 @@ env:
   # nobody published.
   PACKAGE: ghcr.io/thingzio/devproof/example-baseline
   TAG: v1
+  # The artifact this example is about. Identity is a function of content, so
+  # this is knowable before publishing and is asserted below rather than read
+  # back -- a build that produces anything else means the lock moved and the
+  # walkthrough now describes an artifact nobody published.
+  DIGEST: sha256:e48f5b2458b1663476770a590e695afa708c19fa02b1458e31d937a4db27dbb6
 
 jobs:
   publish:
@@ -74,7 +79,21 @@ jobs:
             --lock devproof.lock.json \
             --to "oci://${PACKAGE}" \
             --tag "${TAG}" \
-            --sign
+            --sign --quiet > published.txt
+          cat published.txt
+
+          # Redirected rather than piped through tee: the shell reports a
+          # pipeline's last command, so a failing build behind a successful tee
+          # would look like a successful publish.
+          #
+          # --quiet prints the canonical digest reference and nothing else, so
+          # this compares what was actually published against what the example
+          # documents, rather than trusting that they still agree.
+          got="$(sed 's/.*@//' published.txt)"
+          if [ "${got}" != "${DIGEST}" ]; then
+            echo "::error::published ${got}, but the example documents ${DIGEST}"
+            exit 1
+          fi
 
       # Everything below is the consumer's half, run here against the artifact
       # that was just published. It is transcribed into the example's README,
@@ -97,6 +116,12 @@ jobs:
           spec:
             subject:
               requireDigestReference: true
+            evidence:
+              # GHCR answers the referrers request with 404, so evidence is
+              # found under the fallback tag scheme. DevProof requires a policy
+              # to opt into that rather than using it silently (DP-028), and
+              # the walkthrough's section 1 is about exactly this.
+              allowTagFallback: true
             provenance:
               required: true
             signatures:
@@ -108,11 +133,11 @@ jobs:
           EOF
 
           echo "::group::inspect"
-          "${RUNNER_TEMP}/devproof" inspect "oci://${PACKAGE}:${TAG}" --evidence
+          "${RUNNER_TEMP}/devproof" inspect "oci://${PACKAGE}@${DIGEST}" --evidence
           echo "::endgroup::"
 
           echo "::group::verify against the pinned identity"
-          "${RUNNER_TEMP}/devproof" verify "oci://${PACKAGE}:${TAG}" --policy policy.yaml
+          "${RUNNER_TEMP}/devproof" verify "oci://${PACKAGE}@${DIGEST}" --policy policy.yaml
           echo "::endgroup::"
 
           echo "::group::independent rebuild from the lock"
@@ -127,7 +152,7 @@ jobs:
           # "they differ" is precisely the outcome worth reporting clearly.
           echo "::group::diff the published artifact against the rebuild"
           if "${RUNNER_TEMP}/devproof" diff \
-               "oci://${PACKAGE}:${TAG}" "oci-layout://./rebuilt:${TAG}"; then
+               "oci://${PACKAGE}@${DIGEST}" "oci-layout://./rebuilt:${TAG}"; then
             echo "diff exit: 0"
           else
             echo "::error::the rebuild does not match the published artifact"
@@ -143,7 +168,7 @@ jobs:
         working-directory: examples/publish-once-reproduce-anywhere
         run: |
           sed 's|publish-example|some-other-workflow|' policy.yaml > wrong.yaml
-          if "${RUNNER_TEMP}/devproof" verify "oci://${PACKAGE}:${TAG}" --policy wrong.yaml; then
+          if "${RUNNER_TEMP}/devproof" verify "oci://${PACKAGE}@${DIGEST}" --policy wrong.yaml; then
             echo "::error::a policy naming the wrong workflow was accepted"
             exit 1
           fi

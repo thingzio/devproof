@@ -8,9 +8,12 @@ another.
 | --- | --- | --- |
 | [tamper-and-trust](tamper-and-trust/) | Why a digest is a name you can rely on: identical builds, what `verify` does and does not claim, a policy that writes nothing when it fails, and what happens when someone changes the stored bytes. | `devproof` ≥ `v0.2.0`, `python3` |
 | [firmware-catalog](firmware-catalog/) | The same ideas against a real inventory: a rack firmware stack from public NVIDIA release notes, diffed across two hardware generations, signed, pinned by digest, and verified with the network refused. It is also explicit about what a passing result does not prove. | `devproof` ≥ `v0.2.0`, `python3`, `openssl` |
+| [publish-once-reproduce-anywhere](publish-once-reproduce-anywhere/) | The multi-party case: one publisher signs an artifact into a registry keyless, and unrelated consumers regenerate it from pinned inputs on their own operating systems and confirm by digest rather than by trusting the channel. Also the air-gapped transfer, trusted root included. | `devproof` ≥ `v0.5.0`, network, `cosign` |
 
-Start with **tamper-and-trust**; it is shorter and everything in the second one
-builds on it.
+Start with **tamper-and-trust**; it is the shortest and the other two assume
+what it establishes. The first two run entirely on your machine. The third is
+the only one that needs a network, because being about distribution is the
+point of it.
 
 ## How these are kept true
 
