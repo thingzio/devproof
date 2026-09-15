@@ -223,7 +223,7 @@ func TestWalkthroughRuns(t *testing.T) {
 	}
 
 	// Section 5: the air-gapped copy verifies with the network refused, using
-	// only the trust material that travelled with it. By digest, because
+	// only the trust material that traveled with it. By digest, because
 	// accept.yaml requires one.
 	if err := run(demo, "verify", "oci-layout://./transfer@"+publishedDigest, "--offline",
 		"--trust-root", "trusted_root.json", "--policy", "accept.yaml"); err != nil {
