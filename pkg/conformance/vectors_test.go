@@ -435,6 +435,32 @@ func TestNonConformingArchivesAreRejected(t *testing.T) {
 			want: "base-256",
 		},
 		{
+			// strconv reads a sign that USTAR has no spelling for, and a
+			// negative size reached the payload slice as a reversed bound.
+			name: "a negative size",
+			entries: func() []entry {
+				e := conformingEntries()
+				e[1].mutate = func(b *block) {
+					b.setString(124, 12, "-0000000001")
+					b.seal()
+				}
+				return e
+			},
+			want: "not octal",
+		},
+		{
+			name: "a signed mode",
+			entries: func() []entry {
+				e := conformingEntries()
+				e[1].mutate = func(b *block) {
+					b.setString(100, 8, "+000644")
+					b.seal()
+				}
+				return e
+			},
+			want: "not octal",
+		},
+		{
 			name: "a symbolic link",
 			entries: func() []entry {
 				e := conformingEntries()
@@ -560,6 +586,33 @@ func TestArchiveFramingIsChecked(t *testing.T) {
 			}
 		})
 	}
+}
+
+// FuzzHeaderIsRefusedNotPanicked feeds the reader arbitrary header blocks.
+//
+// The checksum is recomputed for every input: an unsealed block is refused
+// before any field is parsed, and the fuzzer would spend its budget there. One
+// block of content and the terminator follow, so whatever size the header
+// declares reaches the payload arithmetic. Refusing an archive is the expected
+// outcome; panicking on one is the failure.
+func FuzzHeaderIsRefusedNotPanicked(f *testing.F) {
+	for _, e := range conformingEntries() {
+		header := headerFor(e.name, e.mode, int64(len(e.content)), e.typeflag)
+		f.Add(header[:])
+	}
+	negative := headerFor("a/b.txt", 0o644, 0, '0')
+	negative.setString(124, 12, "-0000000001")
+	f.Add(negative[:])
+
+	f.Fuzz(func(t *testing.T, raw []byte) {
+		var header block
+		copy(header[:], raw)
+		header.seal()
+
+		plain := make([]byte, 4*512)
+		copy(plain, header[:])
+		_, _ = verifyLayerBytes(t, nil, compress(t, plain), conformance.LevelCanonical)
+	})
 }
 
 // TestGzipHeaderIsFrozen covers the container.

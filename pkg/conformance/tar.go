@@ -189,15 +189,25 @@ func checkTerminator(tail []byte) error {
 }
 
 // readPayload returns an entry's content and how many bytes it occupied.
+//
+// The size is bounded by the bytes that remain while it is still an int64, so
+// converting it to an index cannot truncate on a platform with a 32-bit int.
 func readPayload(data []byte, offset int, size int64) ([]byte, int, error) {
-	blocks := (size + blockSize - 1) / blockSize
-	consumed := int(blocks) * blockSize
-	if offset+consumed > len(data) {
+	if size < 0 {
+		return nil, 0, fmt.Errorf("declares a negative size %d", size)
+	}
+	remaining := len(data) - offset
+	if size > int64(remaining) {
+		return nil, 0, fmt.Errorf("declares %d bytes, which run past the end of the archive", size)
+	}
+	n := int(size)
+	consumed := (n + blockSize - 1) / blockSize * blockSize
+	if consumed > remaining {
 		return nil, 0, fmt.Errorf("declares %d bytes, which run past the end of the archive", size)
 	}
 
-	payload := data[offset : offset+int(size)]
-	for _, b := range data[offset+int(size) : offset+consumed] {
+	payload := data[offset : offset+n]
+	for _, b := range data[offset+n : offset+consumed] {
 		if b != 0 {
 			return nil, 0, errors.New("the padding after the content is not zero")
 		}
@@ -354,6 +364,11 @@ func parseOctal(field []byte, label, name string) (int64, error) {
 		// An all-NUL numeric field is how some writers spell zero. It carries
 		// the same value and no ambiguity, so it is read rather than refused.
 		return 0, nil
+	}
+	// strconv.ParseInt also reads a leading sign, which USTAR has no spelling
+	// for. Accepting one let a negative size through to the payload slice.
+	if strings.Trim(trimmed, "01234567") != "" {
+		return 0, fmt.Errorf("the %s is %q, which is not octal", where, trimmed)
 	}
 	value, err := strconv.ParseInt(trimmed, 8, 64)
 	if err != nil {
