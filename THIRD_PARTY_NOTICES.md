@@ -28,7 +28,7 @@ here.
 | `github.com/distribution/reference` | v0.6.0 | Apache-2.0 |
 | `github.com/emirpasic/gods` | v1.18.1 | BSD-2-Clause |
 | `github.com/go-git/gcfg` | v1.5.1-0.20230307220236-3a3c6141e376 | BSD-3-Clause |
-| `github.com/go-git/go-billy/v5` | v5.9.1 | Apache-2.0 |
+| `github.com/go-git/go-billy/v5` | v5.9.2 | Apache-2.0 |
 | `github.com/go-git/go-git/v5` | v5.19.2 | Apache-2.0 |
 | `github.com/go-jose/go-jose/v4` | v4.1.5 | Apache-2.0 |
 | `github.com/go-logr/logr` | v1.4.4 | Apache-2.0 |
@@ -89,7 +89,7 @@ here.
 | `github.com/theupdateframework/go-tuf/v2` | v2.4.2 | Apache-2.0 |
 | `github.com/transparency-dev/formats` | v0.1.1 | Apache-2.0 |
 | `github.com/transparency-dev/merkle` | v0.0.2 | Apache-2.0 |
-| `github.com/urfave/cli/v3` | v3.11.0 | MIT |
+| `github.com/urfave/cli/v3` | v3.13.0 | MIT |
 | `github.com/xanzy/ssh-agent` | v0.3.3 | Apache-2.0 |
 | `github.com/youmark/pkcs8` | v0.0.0-20240726163527-a2c0da244d78 | MIT |
 | `go.opentelemetry.io/auto/sdk` | v1.2.1 | Apache-2.0 |
