@@ -10,7 +10,7 @@ here.
 > Do not edit by hand -- run `make notices` after changing dependencies.
 
 
-## Dependencies (99)
+## Dependencies (98)
 
 | Module | Version | License |
 |---|---|---|
@@ -29,7 +29,7 @@ here.
 | `github.com/emirpasic/gods` | v1.18.1 | BSD-2-Clause |
 | `github.com/go-git/gcfg` | v1.5.1-0.20230307220236-3a3c6141e376 | BSD-3-Clause |
 | `github.com/go-git/go-billy/v5` | v5.9.2 | Apache-2.0 |
-| `github.com/go-git/go-git/v5` | v5.19.2 | Apache-2.0 |
+| `github.com/go-git/go-git/v5` | v5.19.3 | Apache-2.0 |
 | `github.com/go-jose/go-jose/v4` | v4.1.5 | Apache-2.0 |
 | `github.com/go-logr/logr` | v1.4.4 | Apache-2.0 |
 | `github.com/go-logr/stdr` | v1.2.2 | Apache-2.0 |
@@ -65,11 +65,10 @@ here.
 | `github.com/jbenet/go-context` | v0.0.0-20150711004518-d14ea06fba99 | MIT |
 | `github.com/jedisct1/go-minisign` | v0.0.0-20260527172527-a09352b57a22 | MIT |
 | `github.com/kevinburke/ssh_config` | v1.6.0 | MIT |
-| `github.com/klauspost/cpuid/v2` | v2.4.0 | MIT |
 | `github.com/oklog/ulid/v2` | v2.1.2 | Apache-2.0 |
 | `github.com/opencontainers/go-digest` | v1.0.0 | Apache-2.0 |
 | `github.com/opencontainers/image-spec` | v1.1.1 | Apache-2.0 |
-| `github.com/pjbgf/sha1cd` | v0.6.0 | Apache-2.0 |
+| `github.com/pjbgf/sha1cd` | v0.7.0 | Apache-2.0 |
 | `github.com/pkg/browser` | v0.0.0-20240102092130-5ac0b6a4141c | BSD-2-Clause |
 | `github.com/pkg/errors` | v0.9.1 | BSD-2-Clause |
 | `github.com/sassoftware/relic/v8` | v8.2.0 | Apache-2.0 |
@@ -89,7 +88,7 @@ here.
 | `github.com/theupdateframework/go-tuf/v2` | v2.4.2 | Apache-2.0 |
 | `github.com/transparency-dev/formats` | v0.1.1 | Apache-2.0 |
 | `github.com/transparency-dev/merkle` | v0.0.2 | Apache-2.0 |
-| `github.com/urfave/cli/v3` | v3.13.0 | MIT |
+| `github.com/urfave/cli/v3` | v3.14.0 | MIT |
 | `github.com/xanzy/ssh-agent` | v0.3.3 | Apache-2.0 |
 | `github.com/youmark/pkcs8` | v0.0.0-20240726163527-a2c0da244d78 | MIT |
 | `go.opentelemetry.io/auto/sdk` | v1.2.1 | Apache-2.0 |
@@ -101,10 +100,10 @@ here.
 | `golang.org/x/mod` | v0.41.0 | BSD-3-Clause |
 | `golang.org/x/net` | v0.60.0 | BSD-3-Clause |
 | `golang.org/x/oauth2` | v0.37.0 | BSD-3-Clause |
-| `golang.org/x/sync` | v0.23.0 | BSD-3-Clause |
-| `golang.org/x/sys` | v0.48.0 | BSD-3-Clause |
-| `golang.org/x/term` | v0.46.0 | BSD-3-Clause |
-| `golang.org/x/text` | v0.42.0 | BSD-3-Clause |
+| `golang.org/x/sync` | v0.24.0 | BSD-3-Clause |
+| `golang.org/x/sys` | v0.49.0 | BSD-3-Clause |
+| `golang.org/x/term` | v0.47.0 | BSD-3-Clause |
+| `golang.org/x/text` | v0.43.0 | BSD-3-Clause |
 | `google.golang.org/genproto/googleapis/api` | v0.0.0-20260911204522-f61a6ca850bd | Apache-2.0 |
 | `google.golang.org/genproto/googleapis/rpc` | v0.0.0-20260911204522-f61a6ca850bd | Apache-2.0 |
 | `google.golang.org/grpc` | v1.83.2 | Apache-2.0 |
