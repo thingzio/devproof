@@ -160,7 +160,7 @@ jobs:
     uses: thingzio/actions/.github/workflows/release-go.yaml@7276775800dbfef1d9671e60c337f3b4b479a4e8  # v1.8.0
     with:
       # Passed explicitly, not inherited. v1.7.0 changed this input's default
-      # from .go-version to go.mod; both say 1.27.1 here so the result is the
+      # from .go-version to go.mod; both say 1.27.2 here so the result is the
       # same either way, but .go-version is what owns the toolchain in this
       # repository and a default that silently moved is not something to rely
       # on.

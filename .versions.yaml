@@ -23,7 +23,7 @@ quality:
 # Static analysis and formatting.
 linting:
   # renovate: datasource=github-releases depName=golangci/golangci-lint
-  golangci_lint: 'v2.13.2'
+  golangci_lint: 'v2.14.0'
   # renovate: datasource=github-releases depName=rhysd/actionlint
   actionlint: 'v1.7.12'
   # renovate: datasource=pypi depName=yamllint
